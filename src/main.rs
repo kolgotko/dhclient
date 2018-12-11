@@ -65,6 +65,7 @@ fn main() {
     println!("{:?}", msg_vec);
 
     let socket = UdpSocket::bind("0.0.0.0:68").unwrap();
+    socket.set_broadcast(true).unwrap();
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
 
     let mut buffer: Vec<u8> = vec![0;10];
