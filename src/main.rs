@@ -1,5 +1,7 @@
 use std::mem::*;
 use std::net::*;
+use std::net::*;
+use std::ptr;
 use std::thread;
 
 #[repr(C)]
@@ -52,10 +54,10 @@ fn main() {
     println!("{:?}", options);
 
     let message_ptr = &message as *const _ as *mut u8;
-    let size_message = size_of::<Message>();
+    let message_size = size_of::<Message>();
 
     let msg_slice = unsafe {
-        std::slice::from_raw_parts(message_ptr as *const u8, size_message) 
+        std::slice::from_raw_parts(message_ptr as *const u8, message_size) 
     };
 
     let mut msg_vec = msg_slice.to_vec();
@@ -68,11 +70,19 @@ fn main() {
     socket.set_broadcast(true).unwrap();
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
 
-    let mut buffer: Vec<u8> = vec![0;10];
+    let mut buffer: Vec<u8> = vec![0;256];
     let (count, addr) = socket.recv_from(&mut buffer).unwrap();
-    println!("{:?} {:?} {:?}", count, addr, buffer);
+
+    let recv_slice = &buffer[0..message_size];
+
+    let recv_message: Message = unsafe {
+        std::ptr::read(recv_slice.as_ptr() as *const _) 
+    };
 
 
+    println!("{:?}", buffer);
+    println!("{:?}", Ipv4Addr::from(recv_message.yiaddr.to_be()));
+    println!("{:x}", recv_message.xid);
 
 
 }
