@@ -1,5 +1,6 @@
 use std::mem::*;
 use std::net::*;
+use std::thread;
 
 #[repr(C)]
 struct Message {
@@ -17,7 +18,7 @@ struct Message {
     chaddr: [u8;16],
     sname: [u8;64],
     file: [u8;128],
-    options: [u8; 340],
+    cookie: u32,
 }
 
 fn main() {
@@ -29,24 +30,48 @@ fn main() {
     message.hlen = 0x06;
     message.xid = 0x6666;
 
-    let mac: u64 = 0xe8_03_9a_ce_61_26;
+    let mac: u64 = 0xe8_03_9a_ce_61_27;
     let oct = &mac as *const _ as *mut u8;
     let mut t = unsafe { *(oct as *const [u8;6]) };
     t.reverse();
 
     &mut message.chaddr[0..6].clone_from_slice(&t);
-    println!("{:?}", message.chaddr);
+
+    let mut options: Vec<u8> = Vec::new();
+
+    let cookie: u32 = 0x63_82_53_63;
+    message.cookie = cookie.to_be();
+
+    let option_53: u32 = 0x35_01_01;
+    let oct = &option_53 as *const _ as *mut u8;
+    let mut t = unsafe { *(oct as *const [u8;3]) };
+    t.reverse();
+
+    options.extend_from_slice(&t);
+
+    println!("{:?}", options);
 
     let message_ptr = &message as *const _ as *mut u8;
     let size_message = size_of::<Message>();
 
-    let sl = unsafe {
+    let msg_slice = unsafe {
         std::slice::from_raw_parts(message_ptr as *const u8, size_message) 
     };
 
-    println!("{:?}", sl);
+    let mut msg_vec = msg_slice.to_vec();
+    msg_vec.append(&mut options);
+    msg_vec.push(0xff);
+
+    println!("{:?}", msg_vec);
 
     let socket = UdpSocket::bind("0.0.0.0:68").unwrap();
-    socket.send_to(sl, "255.255.255.255:67").unwrap();
+    socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
+
+    let mut buffer: Vec<u8> = vec![0;10];
+    let (count, addr) = socket.recv_from(&mut buffer).unwrap();
+    println!("{:?} {:?} {:?}", count, addr, buffer);
+
+
+
 
 }
