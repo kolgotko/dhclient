@@ -1,8 +1,12 @@
+extern crate libc;
+extern crate dhclient;
+
 use std::mem::*;
 use std::net::*;
 use std::net::*;
 use std::ptr;
 use std::thread;
+
 
 #[repr(C)]
 struct Message {
@@ -23,7 +27,22 @@ struct Message {
     cookie: u32,
 }
 
+use dhclient::pcap::*;
+use std::ffi::*;
+
 fn main() {
+
+
+    unsafe {
+
+        let dev = CString::new("alc0").unwrap();
+        let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+
+        // pcap_lookupdev(error.as_ptr() as *mut _);
+        pcap_open_live(dev.as_ptr(), BUFSIZ as i32, 1, 1000, error.as_ptr() as *mut _);
+
+    }
+    panic!();
 
     let mut message = unsafe { zeroed::<Message>() };
 
