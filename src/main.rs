@@ -30,6 +30,14 @@ struct Message {
 use dhclient::pcap::*;
 use std::ffi::*;
 
+#[no_mangle]
+pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthdr, packet: *const u8) {
+
+    let header = *header;
+    println!("capture {:?}", header);
+
+}
+
 fn main() {
 
 
@@ -39,7 +47,16 @@ fn main() {
         let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
 
         // pcap_lookupdev(error.as_ptr() as *mut _);
-        pcap_open_live(dev.as_ptr(), BUFSIZ as i32, 1, 1000, error.as_ptr() as *mut _);
+        let handle = pcap_open_live(dev.as_ptr(), BUFSIZ as i32, 1, 1000, error.as_ptr() as *mut _);
+
+        // let header = uninitialized::<pcap_pkthdr>();
+        // let packet = pcap_next(handle, &header as *const _ as *mut _);
+        // pcap_close(handle);
+
+        pcap_loop(handle, 10, Some(packet_handler), ptr::null_mut() as *mut _);
+
+        // println!("{:?}", header);
+        // println!("{:?}", handle);
 
     }
     panic!();
