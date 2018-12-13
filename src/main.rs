@@ -4,9 +4,86 @@ extern crate dhclient;
 use std::mem::*;
 use std::net::*;
 use std::net::*;
+use std::ffi::*;
 use std::ptr;
 use std::thread;
 use std::collections::HashMap;
+use dhclient::pcap::*;
+use std::io;
+use std::error::Error;
+
+struct Pcap {
+    iface: CString,
+    handle: *mut pcap_t,
+}
+
+impl Pcap {
+    fn new(iface: CString) -> Self {
+        unsafe {
+
+            let object = Pcap {
+                iface: iface,
+                handle: uninitialized(),
+            };
+
+            let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+            let handle = pcap_open_live(
+                iface.as_ptr(),
+                BUFSIZ as i32,
+                1,
+                0,
+                error.as_ptr() as *mut _
+                );
+
+            object.handle = handle;
+            object
+
+        }
+    }
+
+    fn set_filter(&mut self, filter: impl Into<String>) -> Result<(), Box<Error>> {
+
+        unimplemented!();
+
+        unsafe {
+            let filter: String = filter.into();
+
+            let dhcp_program: bpf_program = uninitialized();
+            let dhcp_program_ptr: *mut bpf_program = &dhcp_program as *const _ as *mut _;
+            let dhcp_filter = CString::new(filter)?;
+
+            let net: bpf_u_int32 = uninitialized();
+            let mask: bpf_u_int32 = uninitialized();
+            let net_ptr = &net as *const _ as *mut _;
+            let mask_ptr = &mask as *const _ as *mut _;
+
+            let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+            let result = pcap_lookupnet(self.iface.as_ptr(), net_ptr, mask_ptr, error.as_ptr() as *mut _);
+            let result = pcap_compile(self.handle, dhcp_program_ptr, dhcp_filter.as_ptr(), 0, net);
+            let result = pcap_setfilter(self.handle, dhcp_program_ptr);
+        }
+
+        Ok(())
+
+    }
+}
+
+impl io::Read for Pcap {
+
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+
+        unimplemented!();
+
+        unsafe {
+
+            let result = pcap_dispatch(self.handle, 1, Some(packet_handler), ptr::null_mut() as *mut _);
+
+        }
+
+    }
+
+}
+
 
 
 #[derive(Debug)]
@@ -64,9 +141,6 @@ struct DhcpMessage {
     cookie: u32,
 }
 
-use dhclient::pcap::*;
-use std::ffi::*;
-
 #[no_mangle]
 pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthdr, packet: *const u8) {
 
@@ -114,7 +188,7 @@ fn main() {
         let result = pcap_compile(handle, dhcp_program_ptr, dhcp_filter.as_ptr(), 0, net);
         let result = pcap_setfilter(handle, dhcp_program_ptr);
 
-        pcap_loop(handle, 10, Some(packet_handler), ptr::null_mut() as *mut _);
+        pcap_dispatch(handle, 10, Some(packet_handler), ptr::null_mut() as *mut _);
 
 
     }
