@@ -21,11 +21,6 @@ impl Pcap {
     fn new(iface: CString) -> Self {
         unsafe {
 
-            let object = Pcap {
-                iface: iface,
-                handle: uninitialized(),
-            };
-
             let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
             let handle = pcap_open_live(
                 iface.as_ptr(),
@@ -35,8 +30,10 @@ impl Pcap {
                 error.as_ptr() as *mut _
                 );
 
-            object.handle = handle;
-            object
+            Pcap {
+                iface: iface,
+                handle: handle,
+            }
 
         }
     }
@@ -66,24 +63,23 @@ impl Pcap {
         Ok(())
 
     }
-}
 
-impl io::Read for Pcap {
-
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn read_packet(&mut self, mut buf: &mut Vec<u8>) -> usize {
 
         unimplemented!();
 
+        let buf_ptr = &buf as *const _  as *mut _;
+
         unsafe {
 
-            let result = pcap_dispatch(self.handle, 1, Some(packet_handler), ptr::null_mut() as *mut _);
+            let result = pcap_dispatch(self.handle, 1, Some(packet_handler), buf_ptr);
 
         }
 
+        123
+
     }
-
 }
-
 
 
 #[derive(Debug)]
