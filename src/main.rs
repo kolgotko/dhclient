@@ -28,6 +28,9 @@ impl Iterator for OptionsIterator<'_> {
 
         let slice = &self.slice[self.offset..];
         let code = slice.get(0)?;
+
+        if *code == 255 { return None; }
+
         let length = slice.get(1)?;
         let data = slice.get(2..2 + *length as usize)?;
 
@@ -77,7 +80,7 @@ pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthd
     let message_slice = &packet[42..message_size];
     let message: DhcpMessage = std::ptr::read(message_slice.as_ptr() as *const _);
 
-    let options_slice = &packet[42+message_size..];
+    let options_slice = &packet[42 + message_size..];
     let opt_iter = OptionsIterator { slice: options_slice, offset: 0 };
 
     let options: HashMap<_, _> = opt_iter.map(|option| (option.code, option)).collect();
@@ -162,20 +165,6 @@ fn main() {
     let socket = UdpSocket::bind("0.0.0.0:68").unwrap();
     socket.set_broadcast(true).unwrap();
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
-
-    let mut buffer: Vec<u8> = vec![0;256];
-    let (count, addr) = socket.recv_from(&mut buffer).unwrap();
-
-    let recv_slice = &buffer[0..message_size];
-
-    let recv_message: DhcpMessage = unsafe {
-        std::ptr::read(recv_slice.as_ptr() as *const _) 
-    };
-
-
-    println!("{:?}", buffer);
-    println!("{:?}", Ipv4Addr::from(recv_message.yiaddr.to_be()));
-    println!("{:x}", recv_message.xid);
 
 
 }
