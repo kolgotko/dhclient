@@ -12,6 +12,7 @@ use dhclient::pcap::*;
 use std::io;
 use std::error::Error;
 
+#[derive(Debug)]
 struct Pcap {
     iface: CString,
     handle: *mut pcap_t,
@@ -26,7 +27,7 @@ impl Pcap {
                 iface.as_ptr(),
                 BUFSIZ as i32,
                 1,
-                0,
+                1000,
                 error.as_ptr() as *mut _
                 );
 
@@ -39,8 +40,6 @@ impl Pcap {
     }
 
     fn set_filter(&mut self, filter: impl Into<String>) -> Result<(), Box<Error>> {
-
-        unimplemented!();
 
         unsafe {
             let filter: String = filter.into();
@@ -64,9 +63,7 @@ impl Pcap {
 
     }
 
-    fn read_packet(&mut self, mut buf: &mut Vec<u8>) -> usize {
-
-        unimplemented!();
+    fn read_packet(&mut self, mut buf: &mut Vec<u8>) -> Result<(), Box<Error>> {
 
         let buf_ptr = &buf as *const _  as *mut _;
 
@@ -76,7 +73,7 @@ impl Pcap {
 
         }
 
-        123
+        Ok(())
 
     }
 }
@@ -140,6 +137,9 @@ struct DhcpMessage {
 #[no_mangle]
 pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthdr, packet: *const u8) {
 
+    println!("capture");
+    return ();
+
     let header = *header;
     let packet = std::slice::from_raw_parts(packet, header.len as usize);
 
@@ -162,6 +162,21 @@ pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthd
 }
 
 fn main() {
+
+    let dev = CString::new("alc0").unwrap();
+
+    let mut pcap = Pcap::new(dev);
+    // pcap.set_filter("udp dst port 68").unwrap();
+    println!("{:?}", pcap);
+
+    let mut buffer = Vec::new();
+
+    println!("read packet");
+    pcap.read_packet(&mut buffer).unwrap();
+
+    println!("{:?}", buffer);
+
+    panic!();
 
     unsafe {
 
