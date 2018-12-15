@@ -1,3 +1,4 @@
+#![feature(try_from)]
 extern crate dhclient;
 
 use std::mem::*;
@@ -10,6 +11,7 @@ use std::collections::HashMap;
 use dhclient::pcap::*;
 use std::io;
 use std::error::Error;
+use std::convert::{ TryFrom, TryInto };
 
 
 #[no_mangle]
@@ -33,6 +35,40 @@ pub unsafe extern "C" fn dispatch_handler(args: *mut u8, header: *const pcap_pkt
 
 }
 
+#[derive(Debug)]
+struct Iface(CString);
+
+impl TryFrom<CString> for Iface {
+    type Error = NulError;
+
+    fn try_from(value: CString) -> Result<Self, Self::Error> {
+        Ok(Iface(value))
+    }
+}
+
+impl TryFrom<&CStr> for Iface {
+    type Error = NulError;
+
+    fn try_from(value: &CStr) -> Result<Self, Self::Error> {
+        Ok(Iface(value.into()))
+    }
+}
+
+impl TryFrom<String> for Iface {
+    type Error = NulError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Iface(CString::new(value)?))
+    }
+}
+
+impl TryFrom<&str> for Iface {
+    type Error = NulError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Iface(CString::new(value)?))
+    }
+}
 
 #[derive(Debug)]
 struct Pcap {
@@ -42,8 +78,11 @@ struct Pcap {
 
 impl Pcap {
 
-    fn new(iface: CString) -> Result<Self, Box<dyn Error>> {
+    fn new<T>(iface: T) -> Result<Self, Box<dyn Error>>
+        where T: TryInto<Iface, Error=NulError> {
         unsafe {
+
+            let iface = iface.try_into()?.0;
 
             let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
             let handle = pcap_open_live(
@@ -56,7 +95,7 @@ impl Pcap {
 
             if handle as usize == 0 {
 
-               Err("pcal_open_live error")?;
+               Err("pcal_open_live error")?
 
             } else {
 
@@ -203,6 +242,15 @@ struct DhcpMessage {
     cookie: u32,
 }
 
+fn lookupdev() -> Result<Iface, Box<Error>> {
+
+    let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+    let dev_ptr = unsafe { pcap_lookupdev(error.as_ptr() as *mut _) };
+    let dev = unsafe { CStr::from_ptr(dev_ptr) };
+    Ok(dev.try_into()?)
+
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn packet_handler(args: *mut u8, header: *const pcap_pkthdr, packet: *const u8) {
 
@@ -239,7 +287,9 @@ fn main() {
     message.hlen = 0x06;
     message.xid = 0x6666;
 
-    let mac: u64 = 0xe8_03_9a_ce_61_27;
+    let mac: String = "e8:03:9a:ce:61:27".split(':').collect();
+    let mac = u64::from_str_radix(&mac, 16).unwrap();
+
     let oct = &mac as *const _ as *mut u8;
     let mut t = unsafe { *(oct as *const [u8;6]) };
     t.reverse();
@@ -274,6 +324,5 @@ fn main() {
     let socket = UdpSocket::bind("0.0.0.0:68").unwrap();
     socket.set_broadcast(true).unwrap();
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
-
 
 }
