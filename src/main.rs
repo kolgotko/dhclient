@@ -103,7 +103,8 @@ pub unsafe extern "C" fn packet_handler(
     println!("{:?}", options);
 }
 
-fn main() {
+fn main() -> Result<(), Box<Error>> {
+
     let mac: String = "e8:03:9a:ce:61:27".split(':').collect();
     let mac = u64::from_str_radix(&mac, 16).unwrap();
     let xid = random_u32(0, u32::max_value());
@@ -147,4 +148,10 @@ fn main() {
     let socket = UdpSocket::bind("0.0.0.0:68").unwrap();
     socket.set_broadcast(true).unwrap();
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
+
+    let iface = lookupdev()?;
+    let mut sniffer = Sniffer::new(iface);
+
+    Ok(())
+
 }
