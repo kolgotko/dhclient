@@ -156,11 +156,11 @@ impl Pcap {
         let buf_ptr = buf as *const _  as *mut _;
         println!("{:?}", buf_ptr);
 
-        let count = unsafe {
+        let captured = unsafe {
             pcap_dispatch(self.handle, 1, Some(read_packet_handler), buf_ptr) 
         };
 
-        match count {
+        match captured {
             -1 => Err("pcap_dispatch error")?,
             -2 => Err("pcap_dispatch break")?,
             count @ _ => Ok(count),
@@ -168,15 +168,15 @@ impl Pcap {
 
     }
 
-    fn dispatch(&self, callback: fn(pcap_pkthdr, &[u8])) -> Result<i32, Box<dyn Error>> {
+    fn dispatch(&self, count: i32, callback: fn(pcap_pkthdr, &[u8])) -> Result<i32, Box<dyn Error>> {
 
         let callback_ptr = &callback as *const _  as *mut _;
 
-        let count = unsafe {
-            pcap_dispatch(self.handle, 1, Some(dispatch_handler), callback_ptr) 
+        let captured = unsafe {
+            pcap_dispatch(self.handle, count, Some(dispatch_handler), callback_ptr) 
         };
 
-        match count {
+        match captured {
             -1 => Err("pcap_dispatch error")?,
             -2 => Err("pcap_dispatch break")?,
             count @ _ => Ok(count),
