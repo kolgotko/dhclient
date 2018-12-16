@@ -150,7 +150,16 @@ fn main() -> Result<(), Box<Error>> {
     socket.send_to(&msg_vec, "255.255.255.255:67").unwrap();
 
     let iface = lookupdev()?;
-    let mut sniffer = Sniffer::new(iface);
+    let mut sniffer = Sniffer::new(iface)?;
+
+    let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
+    println!("{:?}", filter_str);
+    sniffer.set_filter(filter_str)?;
+
+    let mut buffer: Vec<u8> = Vec::new();
+    let count = sniffer.read_packet(&mut buffer)?;
+
+    println!("{:?}", buffer);
 
     Ok(())
 

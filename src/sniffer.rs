@@ -39,6 +39,9 @@ pub enum SnifferError {
     OpenLiveError(String),
     FromBytesWithNulError(FromBytesWithNulError),
     Utf8Error(Utf8Error),
+    SetFilterError(String),
+    CompileRuleError(String),
+    LookupNetError(String),
 }
 
 impl fmt::Display for SnifferError {
@@ -48,6 +51,9 @@ impl fmt::Display for SnifferError {
             SnifferError::OpenLiveError(value) => value.fmt(f),
             SnifferError::FromBytesWithNulError(error) => error.fmt(f),
             SnifferError::Utf8Error(error) => error.fmt(f),
+            SnifferError::SetFilterError(error) => error.fmt(f),
+            SnifferError::CompileRuleError(error) => error.fmt(f),
+            SnifferError::LookupNetError(value) => value.fmt(f),
         }
     }
 }
@@ -157,27 +163,7 @@ impl Sniffer {
         }
     }
 
-    pub fn set_timeout(&mut self, ms: i32) -> Result<(), Box<dyn Error>> {
-        let result = unsafe { pcap_set_timeout(self.handle, ms) };
-
-        if result == 0 {
-            Ok(())
-        } else {
-            Err("pcap_set_timeout error")?
-        }
-    }
-
-    pub fn set_promisc(&mut self, value: bool) -> Result<(), Box<dyn Error>> {
-        let result = unsafe { pcap_set_promisc(self.handle, value.into()) };
-
-        if result == 0 {
-            Ok(())
-        } else {
-            Err("pcap_set_promisc error")?
-        }
-    }
-
-    pub fn set_filter(&mut self, filter: impl Into<String>) -> Result<(), Box<Error>> {
+    pub fn set_filter(&mut self, filter: impl Into<String>) -> Result<(), SnifferError> {
         unsafe {
             let filter: String = filter.into();
 
@@ -191,14 +177,30 @@ impl Sniffer {
             let mask_ptr = &mask as *const _ as *mut _;
 
             let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
-            let _result = pcap_lookupnet(
+            let result = pcap_lookupnet(
                 self.iface.as_ptr(),
                 net_ptr,
                 mask_ptr,
                 error.as_ptr() as *mut _,
             );
-            let _result = pcap_compile(self.handle, dhcp_program_ptr, dhcp_filter.as_ptr(), 0, net);
-            let _result = pcap_setfilter(self.handle, dhcp_program_ptr);
+
+            if result == -1 {
+                let cstr_error = CStr::from_bytes_with_nul(&error)?;
+                let string_error = cstr_error.to_str()?.to_string();
+                return Err(SnifferError::LookupNetError(string_error));
+            }
+
+            let result = pcap_compile(self.handle, dhcp_program_ptr, dhcp_filter.as_ptr(), 0, net);
+            if result == -1 {
+                let error = SnifferError::CompileRuleError(self.get_error()?);
+                return Err(error);
+            }
+
+            let result = pcap_setfilter(self.handle, dhcp_program_ptr);
+            if result == -1 {
+                let error = SnifferError::SetFilterError(self.get_error()?);
+                return Err(error);
+            }
         }
 
         Ok(())
@@ -233,6 +235,14 @@ impl Sniffer {
             count @ _ => Ok(count),
         }
     }
+
+    fn get_error(&self) -> Result<String, Utf8Error> {
+
+        let error_ptr = unsafe { pcap_geterr(self.handle) };
+        let cstr_error = unsafe { CStr::from_ptr(error_ptr) };
+        Ok(cstr_error.to_str()?.to_string())
+
+    }
 }
 
 impl Drop for Sniffer {
@@ -247,3 +257,4 @@ pub fn lookupdev() -> Result<String, SnifferError> {
     let cstr_dev = unsafe { CStr::from_ptr(dev_ptr) };
     Ok(cstr_dev.to_str()?.to_string())
 }
+
