@@ -5,6 +5,7 @@ authors = ["Bykov Igor <igorb.dev@websm.io>"]
 edition = "2018"
 
 [dependencies]
+random-integer = "*"
 
 [build-dependencies]
 bindgen = "*"
