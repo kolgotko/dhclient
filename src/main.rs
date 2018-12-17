@@ -113,11 +113,9 @@ fn main() -> Result<(), Box<Error>> {
     let cookie: u32 = 0x63_82_53_63;
     message.cookie = cookie.to_be();
 
-    let mut option_53: u32 = 0x35_01_01_u32;
-    let oct = &option_53 as *const _ as *mut u8;
-    let mut option_53 = unsafe { *(oct as *const [u8; 3]) };
-    option_53.reverse();
-    options.extend_from_slice(&option_53);
+    let mut option_53: u32 = 0x35_01_01;
+    let option_53 = option_53.to_be_bytes();
+    options.extend_from_slice(&option_53[1..]);
 
     let msg_slice = message.as_slice();
     let mut msg_vec = msg_slice.to_vec();
@@ -131,17 +129,17 @@ fn main() -> Result<(), Box<Error>> {
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let iface = lookupdev()?;
+    println!("{:x}", xid);
+    println!("{:?}", iface);
     let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
     let mut sniffer = Sniffer::new(iface)?;
-    sniffer.set_timeout(10000)?
+    sniffer.set_timeout(20000)?
         .set_promisc(true)?
         .set_snaplen(BUFSIZ as i32)?
         .activate()?
         .set_filter(filter_str)?;
 
-
     let (_, data) = sniffer.read_next().ok_or("not captured")?;
-
     let message_size = size_of::<DhcpMessage>();
     let message_slice = &data[42..message_size];
     let mut message: DhcpMessage = message_slice.into();
@@ -151,7 +149,9 @@ fn main() -> Result<(), Box<Error>> {
         offset: 0,
     };
 
-    let options: HashMap<_, _> = opt_iter.map(|option| (option.code, option)).collect();
+    let options: HashMap<_, _> = opt_iter
+        .map(|option| (option.code, option))
+        .collect();
 
     let yiaddr = message.yiaddr;
     let siaddr = message.siaddr;
@@ -164,26 +164,17 @@ fn main() -> Result<(), Box<Error>> {
 
     let mut options: Vec<u8> = Vec::new();
 
-    let cookie: u32 = 0x63_82_53_63;
-    message.cookie = cookie.to_be();
-
     let option_53: u32 = 0x35_01_03;
-    let oct = &option_53 as *const _ as *mut u8;
-    let mut option_53 = unsafe { *(oct as *const [u8; 3]) };
-    option_53.reverse();
-    options.extend_from_slice(&option_53);
+    let option_53 = option_53.to_be_bytes();
+    options.extend_from_slice(&option_53[1..]);
 
     let option_50: u64 = 0x05_04_00_00_00_00 + yiaddr as u64;
-    let oct = &option_50 as *const _ as *mut u8;
-    let mut option_50 = unsafe { *(oct as *const [u8; 6]) };
-    option_50.reverse();
-    options.extend_from_slice(&option_50);
+    let option_50 = option_50.to_be_bytes();
+    options.extend_from_slice(&option_50[2..]);
 
     let option_54: u64 = 0x45_04_00_00_00_00 + siaddr as u64;
-    let oct = &option_54 as *const _ as *mut u8;
-    let mut option_54 = unsafe { *(oct as *const [u8; 6]) };
-    option_54.reverse();
-    options.extend_from_slice(&option_54);
+    let option_54 = option_54.to_be_bytes();
+    options.extend_from_slice(&option_54[2..]);
 
     let msg_sclie = message.as_slice();
     let mut msg_vec = msg_slice.to_vec();
@@ -193,7 +184,6 @@ fn main() -> Result<(), Box<Error>> {
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     println!("exit");
-
 
     Ok(())
 
