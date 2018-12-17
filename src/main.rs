@@ -3,6 +3,7 @@ extern crate random_integer;
 
 use dhclient::pcap::*;
 use dhclient::sniffer::*;
+use dhclient::sniffer::Config as SnifferConfig;
 use random_integer::*;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
@@ -71,36 +72,21 @@ struct DhcpMessage {
     cookie: u32,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn packet_handler(
-    args: *mut u8,
-    header: *const pcap_pkthdr,
-    packet: *const u8,
-) {
-    println!("capture");
-    return ();
+impl From<&[u8]> for DhcpMessage {
+    fn from(value: &[u8]) -> Self {
+        unsafe {
+            std::ptr::read(value.as_ptr() as *const _)
+        }
+    }
+}
 
-    let header = *header;
-    let packet = std::slice::from_raw_parts(packet, header.len as usize);
-
-    println!("capture {:?}", header);
-    println!("packet {:?}", packet);
-
-    let message_size = size_of::<DhcpMessage>();
-    let message_slice = &packet[42..message_size];
-    let message: DhcpMessage = std::ptr::read(message_slice.as_ptr() as *const _);
-
-    let options_slice = &packet[42 + message_size..];
-    let opt_iter = OptionsIterator {
-        slice: options_slice,
-        offset: 0,
-    };
-
-    let options: HashMap<_, _> = opt_iter.map(|option| (option.code, option)).collect();
-
-    println!("{:?}", Ipv4Addr::from(message.yiaddr.to_be()));
-    println!("{:x}", message.xid);
-    println!("{:?}", options);
+impl DhcpMessage {
+    fn as_slice(&self) -> &[u8] {
+        unsafe {
+            let message_ptr = self as *const _ as *mut u8;
+            slice::from_raw_parts(message_ptr as *const u8, size_of::<DhcpMessage>()) 
+        }
+    }
 }
 
 fn main() -> Result<(), Box<Error>> {
@@ -114,7 +100,7 @@ fn main() -> Result<(), Box<Error>> {
     message.op = 0x01;
     message.htype = 0x01;
     message.hlen = 0x06;
-    message.xid = xid;
+    message.xid = xid.to_be();
 
     let oct = &mac as *const _ as *mut u8;
     let mut t = unsafe { *(oct as *const [u8; 6]) };
@@ -134,11 +120,7 @@ fn main() -> Result<(), Box<Error>> {
 
     options.extend_from_slice(&t);
 
-    let message_ptr = &message as *const _ as *mut u8;
-    let message_size = size_of::<DhcpMessage>();
-
-    let msg_slice = unsafe { slice::from_raw_parts(message_ptr as *const u8, message_size) };
-
+    let msg_slice = message.as_slice();
     let mut msg_vec = msg_slice.to_vec();
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
@@ -150,16 +132,34 @@ fn main() -> Result<(), Box<Error>> {
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let iface = lookupdev()?;
-    let mut sniffer = Sniffer::new(iface)?;
+    let mut config = SnifferConfig::default();
+    config.timeout = 10000;
+    let mut sniffer = Sniffer::new(iface, config)?;
 
     let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
     println!("{:?}", filter_str);
     sniffer.set_filter(filter_str)?;
 
-    let mut buffer: Vec<u8> = Vec::new();
-    let count = sniffer.read_packet(&mut buffer)?;
+    let mut packet: Vec<u8> = Vec::new();
+    let count = sniffer.read_packet(&mut packet)?;
 
-    println!("{:?}", buffer);
+    let message_size = size_of::<DhcpMessage>();
+    let message_slice = &packet[42..message_size];
+    let message: DhcpMessage = message_slice.into();
+    let options_slice = &packet[42 + message_size..];
+    let opt_iter = OptionsIterator {
+        slice: options_slice,
+        offset: 0,
+    };
+
+    let options: HashMap<_, _> = opt_iter.map(|option| (option.code, option)).collect();
+
+    println!("{:?}", Ipv4Addr::from(message.yiaddr.to_be()));
+    println!("{:x}", message.xid);
+    println!("{:?}", options);
+
+    println!("exit");
+
 
     Ok(())
 

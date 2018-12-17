@@ -6,7 +6,8 @@ use std::mem::*;
 use std::slice;
 use std::fmt;
 use std::str::Utf8Error;
-use std::ops::{ Deref, DerefMut };
+use std::ops::{Deref, DerefMut};
+use std::default::Default;
 
 #[no_mangle]
 pub unsafe extern "C" fn read_packet_handler(
@@ -42,6 +43,8 @@ pub enum SnifferError {
     SetFilterError(String),
     CompileRuleError(String),
     LookupNetError(String),
+    DispatchError(String),
+    LoopTerminated,
 }
 
 impl fmt::Display for SnifferError {
@@ -54,6 +57,8 @@ impl fmt::Display for SnifferError {
             SnifferError::SetFilterError(error) => error.fmt(f),
             SnifferError::CompileRuleError(error) => error.fmt(f),
             SnifferError::LookupNetError(value) => value.fmt(f),
+            SnifferError::DispatchError(value) => value.fmt(f),
+            SnifferError::LoopTerminated => write!(f, "loop terminated"),
         }
     }
 }
@@ -128,13 +133,29 @@ impl TryFrom<&str> for Iface {
 }
 
 #[derive(Debug)]
+pub struct Config {
+    pub promisc: bool,
+    pub timeout: i32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            promisc: true,
+            timeout: 1000,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Sniffer {
     iface: CString,
+    config: Config,
     handle: *mut pcap_t,
 }
 
 impl Sniffer {
-    pub fn new<T>(iface: T) -> Result<Self, SnifferError>
+    pub fn new<T>(iface: T, config: Config) -> Result<Self, SnifferError>
     where
         T: TryInto<Iface, Error = SnifferError>,
     {
@@ -145,8 +166,8 @@ impl Sniffer {
             let handle = pcap_open_live(
                 iface.as_ptr(),
                 BUFSIZ as i32,
-                1,
-                1000,
+                config.promisc.into(),
+                config.timeout,
                 error.as_ptr() as *mut _,
             );
 
@@ -158,6 +179,7 @@ impl Sniffer {
                 Ok(Sniffer {
                     iface: iface,
                     handle: handle,
+                    config: config,
                 })
             }
         }
@@ -206,15 +228,17 @@ impl Sniffer {
         Ok(())
     }
 
-    pub fn read_packet(&self, buf: &mut Vec<u8>) -> Result<i32, Box<dyn Error>> {
-        let buf_ptr = buf as *const _ as *mut _;
-        println!("{:?}", buf_ptr);
+    pub fn read_packet(&self, buf: &mut Vec<u8>) -> Result<i32, SnifferError> {
 
+        let buf_ptr = buf as *const _ as *mut _;
         let captured = unsafe { pcap_dispatch(self.handle, 1, Some(read_packet_handler), buf_ptr) };
 
         match captured {
-            -1 => Err("pcap_dispatch error")?,
-            -2 => Err("pcap_dispatch break")?,
+            -1 => {
+                let error = self.get_error()?;
+                Err(SnifferError::DispatchError(error))
+            },
+            -2 => Err(SnifferError::LoopTerminated),
             count @ _ => Ok(count),
         }
     }
@@ -223,15 +247,18 @@ impl Sniffer {
         &self,
         count: i32,
         callback: fn(pcap_pkthdr, &[u8]),
-    ) -> Result<i32, Box<dyn Error>> {
+    ) -> Result<i32, SnifferError> {
         let callback_ptr = &callback as *const _ as *mut _;
 
         let captured =
             unsafe { pcap_dispatch(self.handle, count, Some(dispatch_handler), callback_ptr) };
 
         match captured {
-            -1 => Err("pcap_dispatch error")?,
-            -2 => Err("pcap_dispatch break")?,
+            -1 => {
+                let error = self.get_error()?;
+                Err(SnifferError::DispatchError(error))
+            },
+            -2 => Err(SnifferError::LoopTerminated),
             count @ _ => Ok(count),
         }
     }
