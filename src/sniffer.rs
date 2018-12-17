@@ -1,4 +1,5 @@
 use crate::pcap::*;
+pub use crate::pcap::BUFSIZ;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::ffi::*;
@@ -8,6 +9,8 @@ use std::fmt;
 use std::str::Utf8Error;
 use std::ops::{Deref, DerefMut};
 use std::default::Default;
+use std::io;
+use std::ptr;
 
 #[no_mangle]
 pub unsafe extern "C" fn read_packet_handler(
@@ -41,9 +44,15 @@ pub enum SnifferError {
     FromBytesWithNulError(FromBytesWithNulError),
     Utf8Error(Utf8Error),
     SetFilterError(String),
+    SetTimeoutError(String),
+    SetSnaplenError(String),
+    SetPromiscError(String),
+    SetNonBlockError(String),
     CompileRuleError(String),
     LookupNetError(String),
     DispatchError(String),
+    ActivateError(String),
+    SelectableFdError(String),
     LoopTerminated,
 }
 
@@ -55,9 +64,15 @@ impl fmt::Display for SnifferError {
             SnifferError::FromBytesWithNulError(error) => error.fmt(f),
             SnifferError::Utf8Error(error) => error.fmt(f),
             SnifferError::SetFilterError(error) => error.fmt(f),
+            SnifferError::SetTimeoutError(error) => error.fmt(f),
+            SnifferError::SetSnaplenError(error) => error.fmt(f),
+            SnifferError::SetPromiscError(error) => error.fmt(f),
+            SnifferError::SetNonBlockError(error) => error.fmt(f),
             SnifferError::CompileRuleError(error) => error.fmt(f),
             SnifferError::LookupNetError(value) => value.fmt(f),
             SnifferError::DispatchError(value) => value.fmt(f),
+            SnifferError::ActivateError(value) => value.fmt(f),
+            SnifferError::SelectableFdError(value) => value.fmt(f),
             SnifferError::LoopTerminated => write!(f, "loop terminated"),
         }
     }
@@ -150,42 +165,72 @@ impl Default for Config {
 #[derive(Debug)]
 pub struct Sniffer {
     iface: CString,
-    config: Config,
     handle: *mut pcap_t,
 }
 
 impl Sniffer {
-    pub fn new<T>(iface: T, config: Config) -> Result<Self, SnifferError>
+    pub fn new<T>(iface: T) -> Result<Self, SnifferError>
     where
         T: TryInto<Iface, Error = SnifferError>,
     {
-        unsafe {
-            let iface = iface.try_into()?.0;
+        let iface = iface.try_into()?.0;
+        let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+        let handle = unsafe {
+            pcap_create(iface.as_ptr(), error.as_ptr() as *mut _)
+        };
 
-            let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
-            let handle = pcap_open_live(
-                iface.as_ptr(),
-                BUFSIZ as i32,
-                config.promisc.into(),
-                config.timeout,
-                error.as_ptr() as *mut _,
-            );
-
-            if handle as usize == 0 {
-                let cstr_error = CStr::from_bytes_with_nul(&error)?;
-                let string_error = cstr_error.to_str()?.to_string();
-                Err(SnifferError::OpenLiveError(string_error))
-            } else {
-                Ok(Sniffer {
-                    iface: iface,
-                    handle: handle,
-                    config: config,
-                })
-            }
+        if handle as usize == 0 {
+            let cstr_error = CStr::from_bytes_with_nul(&error)?;
+            let string_error = cstr_error.to_str()?.to_string();
+            Err(SnifferError::OpenLiveError(string_error))
+        } else {
+            Ok(Sniffer {
+                iface: iface,
+                handle: handle,
+            })
         }
     }
 
-    pub fn set_filter(&mut self, filter: impl Into<String>) -> Result<(), SnifferError> {
+    pub fn set_timeout(&mut self, ms: i32) -> Result<&mut Self, SnifferError> {
+
+        let result = unsafe { pcap_set_timeout(self.handle, ms) };
+
+        if result != 0 {
+            let error = self.get_error()?;
+            Err(SnifferError::SetTimeoutError(error))
+        } else {
+            Ok(self)
+        }
+
+    }
+
+    pub fn set_snaplen(&mut self, value: i32) -> Result<&mut Self, SnifferError> {
+
+        let result = unsafe { pcap_set_snaplen(self.handle, value) };
+
+        if result != 0 {
+            let error = self.get_error()?;
+            Err(SnifferError::SetSnaplenError(error))
+        } else {
+            Ok(self)
+        }
+
+    }
+
+    pub fn set_promisc(&mut self, value: bool) -> Result<&mut Self, SnifferError> {
+
+        let result = unsafe { pcap_set_promisc(self.handle, value.into()) };
+
+        if result != 0 {
+            let error = self.get_error()?;
+            Err(SnifferError::SetPromiscError(error))
+        } else {
+            Ok(self)
+        }
+
+    }
+
+    pub fn set_filter(&mut self, filter: impl Into<String>) -> Result<&mut Self, SnifferError> {
         unsafe {
             let filter: String = filter.into();
 
@@ -225,22 +270,39 @@ impl Sniffer {
             }
         }
 
-        Ok(())
+        Ok(self)
     }
 
-    pub fn read_packet(&self, buf: &mut Vec<u8>) -> Result<i32, SnifferError> {
+    pub fn activate(&mut self) -> Result<&mut Self, SnifferError> {
 
-        let buf_ptr = buf as *const _ as *mut _;
-        let captured = unsafe { pcap_dispatch(self.handle, 1, Some(read_packet_handler), buf_ptr) };
+        let result = unsafe { pcap_activate(self.handle) };
 
-        match captured {
-            -1 => {
-                let error = self.get_error()?;
-                Err(SnifferError::DispatchError(error))
-            },
-            -2 => Err(SnifferError::LoopTerminated),
-            count @ _ => Ok(count),
+        if result != 0 {
+            let error = self.get_error()?;
+            Err(SnifferError::ActivateError(error))
+        } else {
+            Ok(self)
         }
+
+    }
+
+    pub fn read_next(&self) -> Option<(pcap_pkthdr, &[u8])> {
+
+        let header_ptr = std::ptr::null::<pcap_pkthdr>();
+        let data_ptr = std::ptr::null::<u8>();
+        let header_ptr_ptr = &header_ptr as *const *const pcap_pkthdr as *mut *mut pcap_pkthdr;
+        let data_ptr_ptr = &data_ptr as *const *const u8 as *mut *const u8;
+
+        let result = unsafe { pcap_next_ex(self.handle, header_ptr_ptr, data_ptr_ptr) };
+
+        if result == 1 {
+            let header: pcap_pkthdr = unsafe { ptr::read(header_ptr) };
+            let data = unsafe { slice::from_raw_parts(data_ptr, header.len as usize) };
+            Some((header, data))
+        } else {
+            None
+        }
+
     }
 
     pub fn dispatch(

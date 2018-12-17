@@ -113,12 +113,11 @@ fn main() -> Result<(), Box<Error>> {
     let cookie: u32 = 0x63_82_53_63;
     message.cookie = cookie.to_be();
 
-    let option_53: u32 = 0x35_01_01;
+    let mut option_53: u32 = 0x35_01_01_u32;
     let oct = &option_53 as *const _ as *mut u8;
-    let mut t = unsafe { *(oct as *const [u8; 3]) };
-    t.reverse();
-
-    options.extend_from_slice(&t);
+    let mut option_53 = unsafe { *(oct as *const [u8; 3]) };
+    option_53.reverse();
+    options.extend_from_slice(&option_53);
 
     let msg_slice = message.as_slice();
     let mut msg_vec = msg_slice.to_vec();
@@ -132,21 +131,21 @@ fn main() -> Result<(), Box<Error>> {
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let iface = lookupdev()?;
-    let mut config = SnifferConfig::default();
-    config.timeout = 10000;
-    let mut sniffer = Sniffer::new(iface, config)?;
-
     let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
-    println!("{:?}", filter_str);
-    sniffer.set_filter(filter_str)?;
+    let mut sniffer = Sniffer::new(iface)?;
+    sniffer.set_timeout(10000)?
+        .set_promisc(true)?
+        .set_snaplen(BUFSIZ as i32)?
+        .activate()?
+        .set_filter(filter_str)?;
 
-    let mut packet: Vec<u8> = Vec::new();
-    let count = sniffer.read_packet(&mut packet)?;
+
+    let (_, data) = sniffer.read_next().ok_or("not captured")?;
 
     let message_size = size_of::<DhcpMessage>();
-    let message_slice = &packet[42..message_size];
-    let message: DhcpMessage = message_slice.into();
-    let options_slice = &packet[42 + message_size..];
+    let message_slice = &data[42..message_size];
+    let mut message: DhcpMessage = message_slice.into();
+    let options_slice = &data[42 + message_size..];
     let opt_iter = OptionsIterator {
         slice: options_slice,
         offset: 0,
@@ -154,9 +153,44 @@ fn main() -> Result<(), Box<Error>> {
 
     let options: HashMap<_, _> = opt_iter.map(|option| (option.code, option)).collect();
 
+    let yiaddr = message.yiaddr;
+    let siaddr = message.siaddr;
+
     println!("{:?}", Ipv4Addr::from(message.yiaddr.to_be()));
-    println!("{:x}", message.xid);
-    println!("{:?}", options);
+    println!("{:?}", Ipv4Addr::from(message.siaddr.to_be()));
+
+    message.op = 0x01;
+    message.yiaddr = 0x0;
+
+    let mut options: Vec<u8> = Vec::new();
+
+    let cookie: u32 = 0x63_82_53_63;
+    message.cookie = cookie.to_be();
+
+    let option_53: u32 = 0x35_01_03;
+    let oct = &option_53 as *const _ as *mut u8;
+    let mut option_53 = unsafe { *(oct as *const [u8; 3]) };
+    option_53.reverse();
+    options.extend_from_slice(&option_53);
+
+    let option_50: u64 = 0x05_04_00_00_00_00 + yiaddr as u64;
+    let oct = &option_50 as *const _ as *mut u8;
+    let mut option_50 = unsafe { *(oct as *const [u8; 6]) };
+    option_50.reverse();
+    options.extend_from_slice(&option_50);
+
+    let option_54: u64 = 0x45_04_00_00_00_00 + siaddr as u64;
+    let oct = &option_54 as *const _ as *mut u8;
+    let mut option_54 = unsafe { *(oct as *const [u8; 6]) };
+    option_54.reverse();
+    options.extend_from_slice(&option_54);
+
+    let msg_sclie = message.as_slice();
+    let mut msg_vec = msg_slice.to_vec();
+    msg_vec.append(&mut options);
+    msg_vec.push(0xff);
+
+    socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     println!("exit");
 
