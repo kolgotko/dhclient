@@ -1,7 +1,13 @@
 #![feature(try_from)]
 extern crate random_integer;
+extern crate clap;
+extern crate serde_json;
+#[macro_use]
+extern crate serde_derive;
+extern crate libjail;
 
 use dhclient::pcap::*;
+use dhclient::ifaddrs::*;
 use dhclient::sniffer::*;
 use dhclient::sniffer::Config as SnifferConfig;
 use random_integer::*;
@@ -10,12 +16,15 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::ffi::*;
 use std::io;
+use std::io::Read;
 use std::mem::*;
 use std::net::*;
 use std::net::*;
 use std::ptr;
 use std::slice;
 use std::thread;
+use serde_json::Value as JsonValue;
+use serde_derive::*;
 
 #[derive(Debug)]
 struct DhcpOption {
@@ -90,7 +99,48 @@ impl DhcpMessage {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct EthFrame {
+    destination: [u8; 6],
+    source: [u8; 6],
+    ip_type: [u8; 2],
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Config {
+    jid: Option<i32>,
+    iface: Option<String>,
+    timeout: Option<i32>,
+    trys: Option<i32>,
+    hwaddr: Option<String>,
+}
+
 fn main() -> Result<(), Box<Error>> {
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+
+    let config: Config = serde_json::from_str(&input)?;
+
+    println!("{:?}", config);
+
+    let ifaddrs_ptr = std::ptr::null::<ifaddrs>();
+    let ifaddrs_ptr_ptr = &ifaddrs_ptr as *const *const ifaddrs as *mut *mut ifaddrs;
+
+    let result = unsafe { getifaddrs(ifaddrs_ptr_ptr) };
+    let ifaddrs: ifaddrs = unsafe { ptr::read(ifaddrs_ptr) };
+
+    println!("{:?}", ifaddrs);
+
+    panic!();
+    let iface = if let Some(iface) = config.iface {
+        iface 
+    } else { 
+        lookupdev()?
+    };
+
+    if let Some(jid) = config.jid { libjail::attach(jid)?; }
 
     let mac: String = "e8:03:9a:ce:61:27".split(':').collect();
     let mac = u64::from_str_radix(&mac, 16)?;
@@ -125,6 +175,7 @@ fn main() -> Result<(), Box<Error>> {
     msg_vec.push(0xff);
 
     let socket = UdpSocket::bind("0.0.0.0:68")?;
+    socket.set_broadcast(true)?;
     println!("{:x}", xid);
     println!("{:?}", iface);
 
@@ -135,7 +186,7 @@ fn main() -> Result<(), Box<Error>> {
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
-    socket.set_broadcast(true)?;
+    println!("send dhcp discover");
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let mut result = None;
@@ -205,6 +256,7 @@ fn main() -> Result<(), Box<Error>> {
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
+    println!("send dhcp request");
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let mut result = None;

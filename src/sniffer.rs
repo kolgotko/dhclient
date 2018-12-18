@@ -51,6 +51,7 @@ pub enum SnifferError {
     LookupNetError(String),
     DispatchError(String),
     ActivateError(String),
+    InjectError(String),
     LoopTerminated,
 }
 
@@ -69,6 +70,7 @@ impl fmt::Display for SnifferError {
             SnifferError::LookupNetError(value) => value.fmt(f),
             SnifferError::DispatchError(value) => value.fmt(f),
             SnifferError::ActivateError(value) => value.fmt(f),
+            SnifferError::InjectError(value) => value.fmt(f),
             SnifferError::LoopTerminated => write!(f, "loop terminated"),
         }
     }
@@ -278,6 +280,20 @@ impl Sniffer {
             Err(SnifferError::ActivateError(error))
         } else {
             Ok(self)
+        }
+
+    }
+
+    pub fn inject(&mut self, buffer: &[u8]) -> Result<i32, SnifferError> {
+
+        let buffer_ptr = buffer.as_ptr() as *const _;
+        let count = unsafe { pcap_inject(self.handle, buffer_ptr, buffer.len()) };
+
+        if count == -1 {
+            let error = self.get_error()?;
+            Err(SnifferError::InjectError(error))
+        } else {
+            Ok(count)
         }
 
     }
