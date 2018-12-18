@@ -1,6 +1,5 @@
 #![feature(try_from)]
 extern crate random_integer;
-extern crate clap;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
@@ -131,7 +130,13 @@ fn main() -> Result<(), Box<Error>> {
     let result = unsafe { getifaddrs(ifaddrs_ptr_ptr) };
     let ifaddrs: ifaddrs = unsafe { ptr::read(ifaddrs_ptr) };
 
-    println!("{:?}", ifaddrs);
+    use dhclient::net_if;
+    let if_data: net_if::if_data = unsafe {
+        *(ifaddrs.ifa_data as *mut net_if::if_data)
+    };
+
+    println!("{:#?}", ifaddrs);
+    println!("{:#?}", if_data);
 
     panic!();
     let iface = if let Some(iface) = config.iface {

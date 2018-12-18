@@ -10,7 +10,6 @@ libjail = { git = "https://github.com/kolgotko/libjail" }
 serde_json = "*"
 serde = "*"
 serde_derive = "*"
-clap = "*"
 
 [build-dependencies]
 bindgen = "*"
