@@ -54,6 +54,7 @@ impl Iterator for OptionsIterator<'_> {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct DhcpMessage {
     op: u8,
     htype: u8,
@@ -94,55 +95,66 @@ fn main() -> Result<(), Box<Error>> {
     let mac: String = "e8:03:9a:ce:61:27".split(':').collect();
     let mac = u64::from_str_radix(&mac, 16)?;
     let xid = random_u32(0, u32::max_value());
+    let iface = lookupdev()?;
+    let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
+    let timeout = 1000;
+    let trys = 10;
 
-    let mut message = unsafe { zeroed::<DhcpMessage>() };
+    let mut dhcp_discover = unsafe { zeroed::<DhcpMessage>() };
 
-    message.op = 0x01;
-    message.htype = 0x01;
-    message.hlen = 0x06;
-    message.xid = xid.to_be();
+    dhcp_discover.op = 0x01;
+    dhcp_discover.htype = 0x01;
+    dhcp_discover.hlen = 0x06;
+    dhcp_discover.xid = xid.to_be();
 
-    let oct = &mac as *const _ as *mut u8;
-    let mut t = unsafe { *(oct as *const [u8; 6]) };
-    t.reverse();
-
-    &mut message.chaddr[0..6].clone_from_slice(&t);
-
-    let mut options: Vec<u8> = Vec::new();
+    let mac_slice = &(mac.to_be_bytes())[2..];
+    &mut dhcp_discover.chaddr[0..6].clone_from_slice(mac_slice);
 
     let cookie: u32 = 0x63_82_53_63;
-    message.cookie = cookie.to_be();
+    dhcp_discover.cookie = cookie.to_be();
+
+    let mut options: Vec<u8> = Vec::new();
 
     let mut option_53: u32 = 0x35_01_01;
     let option_53 = option_53.to_be_bytes();
     options.extend_from_slice(&option_53[1..]);
 
-    let msg_slice = message.as_slice();
+    let msg_slice = dhcp_discover.as_slice();
     let mut msg_vec = msg_slice.to_vec();
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
 
-    println!("{:?}", msg_vec);
-
     let socket = UdpSocket::bind("0.0.0.0:68")?;
-    socket.set_broadcast(true)?;
-    socket.send_to(&msg_vec, "255.255.255.255:67")?;
-
-    let iface = lookupdev()?;
     println!("{:x}", xid);
     println!("{:?}", iface);
-    let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
-    let mut sniffer = Sniffer::new(iface)?;
-    sniffer.set_timeout(20000)?
+
+    let mut sniffer = Sniffer::new(iface.to_owned())?;
+    sniffer.set_timeout(timeout)?
         .set_promisc(true)?
         .set_snaplen(BUFSIZ as i32)?
         .activate()?
-        .set_filter(filter_str)?;
+        .set_filter(filter_str.to_owned())?;
 
-    let (_, data) = sniffer.read_next().ok_or("not captured")?;
+    socket.set_broadcast(true)?;
+    socket.send_to(&msg_vec, "255.255.255.255:67")?;
+
+    let mut result = None;
+    for _ in 0..trys {
+
+        match sniffer.read_next() {
+            option @ Some(_) => {
+                result = option;
+                break;
+            },
+            _ => {}
+        }
+
+    }
+
+    let (_, data) = result.ok_or("not captured dhcp offer")?;
     let message_size = size_of::<DhcpMessage>();
     let message_slice = &data[42..message_size];
-    let mut message: DhcpMessage = message_slice.into();
+    let mut dhcp_offer: DhcpMessage = message_slice.into();
     let options_slice = &data[42 + message_size..];
     let opt_iter = OptionsIterator {
         slice: options_slice,
@@ -153,14 +165,17 @@ fn main() -> Result<(), Box<Error>> {
         .map(|option| (option.code, option))
         .collect();
 
-    let yiaddr = message.yiaddr;
-    let siaddr = message.siaddr;
+    let yiaddr = dhcp_offer.yiaddr.to_be();
+    let siaddr = dhcp_offer.siaddr.to_be();
 
-    println!("{:?}", Ipv4Addr::from(message.yiaddr.to_be()));
-    println!("{:?}", Ipv4Addr::from(message.siaddr.to_be()));
+    println!("{:?}", Ipv4Addr::from(yiaddr));
+    println!("{:?}", Ipv4Addr::from(siaddr));
 
-    message.op = 0x01;
-    message.yiaddr = 0x0;
+    let mut dhcp_request = dhcp_offer.clone();
+
+    dhcp_request.op = 0x01;
+    dhcp_request.yiaddr = 0x0;
+    dhcp_request.siaddr = 0x0;
 
     let mut options: Vec<u8> = Vec::new();
 
@@ -168,21 +183,58 @@ fn main() -> Result<(), Box<Error>> {
     let option_53 = option_53.to_be_bytes();
     options.extend_from_slice(&option_53[1..]);
 
-    let option_50: u64 = 0x05_04_00_00_00_00 + yiaddr as u64;
+    let option_50: u64 = 0x32_04_00_00_00_00 + yiaddr as u64;
     let option_50 = option_50.to_be_bytes();
     options.extend_from_slice(&option_50[2..]);
 
-    let option_54: u64 = 0x45_04_00_00_00_00 + siaddr as u64;
+    let option_54: u64 = 0x36_04_00_00_00_00 + siaddr as u64;
     let option_54 = option_54.to_be_bytes();
     options.extend_from_slice(&option_54[2..]);
 
-    let msg_sclie = message.as_slice();
+    let msg_sclie = dhcp_request.as_slice();
     let mut msg_vec = msg_slice.to_vec();
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
 
+    println!("{:?}", &msg_vec);
+
+    let mut sniffer = Sniffer::new(iface.to_owned())?;
+    sniffer.set_timeout(timeout)?
+        .set_promisc(true)?
+        .set_snaplen(BUFSIZ as i32)?
+        .activate()?
+        .set_filter(filter_str.to_owned())?;
+
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
+    let mut result = None;
+    for _ in 0..trys {
+
+        match sniffer.read_next() {
+            option @ Some(_) => {
+                result = option;
+                break;
+            },
+            _ => {}
+        }
+
+    }
+
+    let (_, data) = result.ok_or("not captured dhcp ack")?;
+    let message_size = size_of::<DhcpMessage>();
+    let message_slice = &data[42..message_size];
+    let mut dhcp_ack: DhcpMessage = message_slice.into();
+    let options_slice = &data[42 + message_size..];
+    let opt_iter = OptionsIterator {
+        slice: options_slice,
+        offset: 0,
+    };
+
+    let options: HashMap<_, _> = opt_iter
+        .map(|option| (option.code, option))
+        .collect();
+
+    println!("{:?}", options);
     println!("exit");
 
     Ok(())
