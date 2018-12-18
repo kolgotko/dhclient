@@ -40,19 +40,17 @@ pub unsafe extern "C" fn dispatch_handler(
 #[derive(Debug)]
 pub enum SnifferError {
     NulError(NulError),
-    OpenLiveError(String),
+    CreateError(String),
     FromBytesWithNulError(FromBytesWithNulError),
     Utf8Error(Utf8Error),
     SetFilterError(String),
     SetTimeoutError(String),
     SetSnaplenError(String),
     SetPromiscError(String),
-    SetNonBlockError(String),
     CompileRuleError(String),
     LookupNetError(String),
     DispatchError(String),
     ActivateError(String),
-    SelectableFdError(String),
     LoopTerminated,
 }
 
@@ -60,19 +58,17 @@ impl fmt::Display for SnifferError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SnifferError::NulError(error) => error.fmt(f),
-            SnifferError::OpenLiveError(value) => value.fmt(f),
+            SnifferError::CreateError(value) => value.fmt(f),
             SnifferError::FromBytesWithNulError(error) => error.fmt(f),
             SnifferError::Utf8Error(error) => error.fmt(f),
             SnifferError::SetFilterError(error) => error.fmt(f),
             SnifferError::SetTimeoutError(error) => error.fmt(f),
             SnifferError::SetSnaplenError(error) => error.fmt(f),
             SnifferError::SetPromiscError(error) => error.fmt(f),
-            SnifferError::SetNonBlockError(error) => error.fmt(f),
             SnifferError::CompileRuleError(error) => error.fmt(f),
             SnifferError::LookupNetError(value) => value.fmt(f),
             SnifferError::DispatchError(value) => value.fmt(f),
             SnifferError::ActivateError(value) => value.fmt(f),
-            SnifferError::SelectableFdError(value) => value.fmt(f),
             SnifferError::LoopTerminated => write!(f, "loop terminated"),
         }
     }
@@ -182,7 +178,7 @@ impl Sniffer {
         if handle as usize == 0 {
             let cstr_error = CStr::from_bytes_with_nul(&error)?;
             let string_error = cstr_error.to_str()?.to_string();
-            Err(SnifferError::OpenLiveError(string_error))
+            Err(SnifferError::CreateError(string_error))
         } else {
             Ok(Sniffer {
                 iface: iface,
