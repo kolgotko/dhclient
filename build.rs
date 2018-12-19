@@ -17,24 +17,4 @@ fn main() {
         .write_to_file(out_path.join("pcap_bindings.rs"))
         .expect("Couldn't write bindings!");
 
-    let bindings = bindgen::Builder::default()
-        .header("/usr/include/ifaddrs.h")
-        .generate()
-        .expect("Unable to generate bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("ifaddrs_bindings.rs"))
-        .expect("Couldn't write bindings!");
-
-    let bindings = bindgen::Builder::default()
-        .header("/usr/include/net/if.h")
-        .generate()
-        .expect("Unable to generate bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("net_if_bindings.rs"))
-        .expect("Couldn't write bindings!");
-
 }

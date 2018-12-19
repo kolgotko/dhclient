@@ -4,9 +4,9 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 extern crate libjail;
+extern crate libc;
 
 use dhclient::pcap::*;
-use dhclient::ifaddrs::*;
 use dhclient::sniffer::*;
 use dhclient::sniffer::Config as SnifferConfig;
 use random_integer::*;
@@ -124,19 +124,36 @@ fn main() -> Result<(), Box<Error>> {
 
     println!("{:?}", config);
 
-    let ifaddrs_ptr = std::ptr::null::<ifaddrs>();
-    let ifaddrs_ptr_ptr = &ifaddrs_ptr as *const *const ifaddrs as *mut *mut ifaddrs;
+    unsafe {
 
-    let result = unsafe { getifaddrs(ifaddrs_ptr_ptr) };
-    let ifaddrs: ifaddrs = unsafe { ptr::read(ifaddrs_ptr) };
+        let if_ptr = std::ptr::null::<pcap_if_t>();
+        let if_ptr_ptr = &if_ptr as *const *const pcap_if_t as *mut *mut pcap_if_t;
 
-    use dhclient::net_if;
-    let if_data: net_if::if_data = unsafe {
-        *(ifaddrs.ifa_data as *mut net_if::if_data)
+
+        let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+        let result = pcap_findalldevs(if_ptr_ptr, error.as_ptr() as *mut _);
+
+        let iface = *if_ptr;
+        let if_name = CStr::from_ptr(iface.name);
+        let if_addr = *iface.addresses;
+        let if_sockaddr = *(if_addr.addr as *mut libc::sockaddr_dl);
+        let data_ptr = &if_sockaddr.sdl_data as *const _ as *mut [u8; 46];
+        let data = *data_ptr;
+
+
+        println!("{:?}", &data[4..10]);
+
+        println!("{:?}", iface);
+        println!("{:?}", if_name);
+        println!("{:?}", if_addr);
+        println!("{:?} {:?}", if_sockaddr.sdl_family, libc::AF_LINK);
+        let if_slice_ptr = &if_sockaddr as *const _ as *mut u8;
+        let if_slice = slice::from_raw_parts(if_slice_ptr as *const _, size_of::<libc::sockaddr_dl>());
+        println!("{:?}", if_slice);
+
+
+    
     };
-
-    println!("{:#?}", ifaddrs);
-    println!("{:#?}", if_data);
 
     panic!();
     let iface = if let Some(iface) = config.iface {

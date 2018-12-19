@@ -359,3 +359,30 @@ pub fn lookupdev() -> Result<String, SnifferError> {
     Ok(cstr_dev.to_str()?.to_string())
 }
 
+pub type Net = bpf_u_int32;
+pub type Mask = bpf_u_int32;
+
+pub fn lookupnet<I>(iface: I) -> Result<(Net, Mask), SnifferError>
+    where I: TryInto<Iface, Error = SnifferError> {
+
+    let iface = iface.try_into()?.0;
+
+    let net: Net = unsafe { uninitialized() };
+    let mask: Mask = unsafe { uninitialized() };
+    let net_ptr = &net as *const _ as *mut _;
+    let mask_ptr = &mask as *const _ as *mut _;
+
+    let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
+    let result = unsafe {
+        pcap_lookupnet(iface.as_ptr(), net_ptr, mask_ptr, error.as_ptr() as *mut _)
+    };
+
+    if result == -1 {
+        let cstr_error = CStr::from_bytes_with_nul(&error)?;
+        let string_error = cstr_error.to_str()?.to_string();
+        Err(SnifferError::LookupNetError(string_error))
+    } else {
+        Ok((net, mask))
+    }
+
+}

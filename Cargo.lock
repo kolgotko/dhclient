@@ -130,6 +130,7 @@ name = "dhclient"
 version = "0.1.0"
 dependencies = [
  "bindgen 0.44.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "libjail 0.1.0 (git+https://github.com/kolgotko/libjail)",
  "random-integer 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.82 (registry+https://github.com/rust-lang/crates.io-index)",
