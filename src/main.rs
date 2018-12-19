@@ -141,7 +141,13 @@ fn main() -> Result<(), Box<Error>> {
         let data = *data_ptr;
 
 
-        println!("{:?}", &data[4..10]);
+        let mac: &mut [u8; 8] = &mut [0; 8];
+        &mut mac[2..8].clone_from_slice(&data[4..10]);
+        let mac = u64::from_be_bytes(*mac);
+
+
+        println!("{:x?}", mac);
+        println!("{:x?}", &data[4..10]);
 
         println!("{:?}", iface);
         println!("{:?}", if_name);
