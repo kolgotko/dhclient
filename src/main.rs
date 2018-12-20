@@ -124,42 +124,8 @@ fn main() -> Result<(), Box<Error>> {
 
     println!("{:?}", config);
 
-    unsafe {
-
-        let if_ptr = std::ptr::null::<pcap_if_t>();
-        let if_ptr_ptr = &if_ptr as *const *const pcap_if_t as *mut *mut pcap_if_t;
-
-
-        let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
-        let result = pcap_findalldevs(if_ptr_ptr, error.as_ptr() as *mut _);
-
-        let iface = *if_ptr;
-        let if_name = CStr::from_ptr(iface.name);
-        let if_addr = *iface.addresses;
-        let if_sockaddr = *(if_addr.addr as *mut libc::sockaddr_dl);
-        let data_ptr = &if_sockaddr.sdl_data as *const _ as *mut [u8; 46];
-        let data = *data_ptr;
-
-
-        let mac: &mut [u8; 8] = &mut [0; 8];
-        &mut mac[2..8].clone_from_slice(&data[4..10]);
-        let mac = u64::from_be_bytes(*mac);
-
-
-        println!("{:x?}", mac);
-        println!("{:x?}", &data[4..10]);
-
-        println!("{:?}", iface);
-        println!("{:?}", if_name);
-        println!("{:?}", if_addr);
-        println!("{:?} {:?}", if_sockaddr.sdl_family, libc::AF_LINK);
-        let if_slice_ptr = &if_sockaddr as *const _ as *mut u8;
-        let if_slice = slice::from_raw_parts(if_slice_ptr as *const _, size_of::<libc::sockaddr_dl>());
-        println!("{:?}", if_slice);
-
-
-    
-    };
+    let hdaddr = get_hdaddr(lookupdev()?);
+    println!("{:x?}", hdaddr);
 
     panic!();
     let iface = if let Some(iface) = config.iface {

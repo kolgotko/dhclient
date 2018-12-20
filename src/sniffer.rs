@@ -1,4 +1,5 @@
 use crate::pcap::*;
+use crate::libc;
 pub use crate::pcap::BUFSIZ;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -52,6 +53,7 @@ pub enum SnifferError {
     DispatchError(String),
     ActivateError(String),
     InjectError(String),
+    IfaceNotFound(String),
     LoopTerminated,
 }
 
@@ -71,6 +73,7 @@ impl fmt::Display for SnifferError {
             SnifferError::DispatchError(value) => value.fmt(f),
             SnifferError::ActivateError(value) => value.fmt(f),
             SnifferError::InjectError(value) => value.fmt(f),
+            SnifferError::IfaceNotFound(value) => value.fmt(f),
             SnifferError::LoopTerminated => write!(f, "loop terminated"),
         }
     }
@@ -159,6 +162,44 @@ impl Default for Config {
         }
     }
 }
+
+pub trait DeviceIter {
+    fn iter(&self) -> DeviceIterator;
+}
+
+pub struct DeviceIterator {
+    iface_next: *mut pcap_if_t,
+}
+
+impl Iterator for DeviceIterator {
+    type Item = pcap_if_t;
+
+    fn next(&mut self) -> Option<Self::Item> {
+
+        if self.iface_next as usize != 0 {
+
+            unsafe {
+                let iface = *self.iface_next;
+                self.iface_next = iface.next;
+                Some(iface)
+            }
+
+        } else { None }
+
+    }
+
+}
+
+impl DeviceIter for pcap_if_t {
+
+    fn iter(&self) -> DeviceIterator {
+
+        DeviceIterator { iface_next: self.next }
+
+    }
+
+}
+
 
 #[derive(Debug)]
 pub struct Sniffer {
@@ -387,35 +428,52 @@ pub fn lookupnet<I>(iface: I) -> Result<(Net, Mask), SnifferError>
 
 }
 
-pub fn get_hdaddr<I>(iface: I) -> Result<(), SnifferError>
+pub fn get_hdaddr<I>(iface: I) -> Result<u64, SnifferError>
     where I: TryInto<Iface, Error = SnifferError> {
 
         unsafe {
+
+            let iface_name = iface.try_into()?.0;
+
             let if_ptr = std::ptr::null::<pcap_if_t>();
             let if_ptr_ptr = &if_ptr as *const *const pcap_if_t as *mut *mut pcap_if_t;
 
             let error: Vec<u8> = vec![0; PCAP_ERRBUF_SIZE as usize];
             let result = pcap_findalldevs(if_ptr_ptr, error.as_ptr() as *mut _);
 
-            let iface = *if_ptr;
-            let if_name = CStr::from_ptr(iface.name);
+            let mut device_iterator = DeviceIterator { iface_next: if_ptr as *mut _ };
+
+            let iface = device_iterator.find(|iface| {
+
+                let if_name: CString = CStr::from_ptr(iface.name).into();
+                let if_addr = *iface.addresses;
+                let if_sockaddr_dl = *(if_addr.addr as *mut libc::sockaddr_dl);
+
+                let family_condition = if_sockaddr_dl.sdl_family == libc::AF_LINK as _;
+                let iface_condition = if_name == iface_name;
+
+                if iface_condition && family_condition { true }
+                else { false }
+
+            });
+
+            let iface = iface.ok_or_else(|| {
+                let error_msg = format!("interface {:?} not found", iface_name);
+                SnifferError::IfaceNotFound(error_msg.into())
+            })?;
+
             let if_addr = *iface.addresses;
             let if_sockaddr_dl = *(if_addr.addr as *mut libc::sockaddr_dl);
-
 
             let data_ptr = &if_sockaddr_dl.sdl_data as *const _ as *mut [u8; 46];
             let data = *data_ptr;
 
+            let hdaddr: &mut [u8; 8] = &mut [0; 8];
+            &mut hdaddr[2..8].clone_from_slice(&data[4..10]);
+            let hdaddr = u64::from_be_bytes(*hdaddr);
 
-            let mac: &mut [u8; 8] = &mut [0; 8];
-            &mut mac[2..8].clone_from_slice(&data[4..10]);
-            let mac = u64::from_be_bytes(*mac);
+            Ok(hdaddr)
 
-
-            println!("{:x?}", mac);
-            println!("{:x?}", &data[4..10]);
         }
-
-        Ok(())
 
     }
