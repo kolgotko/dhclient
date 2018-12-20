@@ -157,6 +157,30 @@ struct EthFrame {
     ip_type: [u8; 2],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct IpHeader {
+    ver: u8,
+    dscp: u8,
+    length: u16,
+    ident: u16,
+    ffo: u16,
+    ttl: u8,
+    proto: u8,
+    checksum: u16,
+    source: u32,
+    destination: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UdpHeader {
+    src_port: u16,
+    dst_port: u16,
+    length: u16,
+    checksum: u16,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Config {
     jid: Option<i32>,
