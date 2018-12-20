@@ -23,6 +23,7 @@ use std::ptr;
 use std::slice;
 use std::thread;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use serde_derive::*;
 
 #[derive(Debug)]
@@ -30,6 +31,56 @@ struct DhcpOption {
     code: u8,
     length: u8,
     data: Vec<u8>,
+}
+
+impl DhcpOption {
+
+    fn to_json(&self) -> (String, JsonValue) {
+
+        let option = self;
+
+        match option.code {
+            1 => {
+                let mut octets: [u8;4] = [0;4];
+                octets.copy_from_slice(&option.data[0..4]);
+                let netmask: Ipv4Addr = octets.into();
+                let netmask = format!("{}", netmask);
+                ("netmask".into(), netmask.into())
+            },
+            15 => {
+                let mut data = option.data.clone();
+                data.push(0);
+                let domain = unsafe { CStr::from_ptr(data.as_ptr() as _) };
+                let domain = domain.to_str().unwrap();
+                ("domain".into(), domain.into())
+            },
+            6 => {
+                let mut octets: [u8;4] = [0;4];
+                octets.copy_from_slice(&option.data[0..4]);
+                let nameserver: Ipv4Addr = octets.into();
+                let nameserver = format!("{}", nameserver);
+                ("nameserver".into(), nameserver.into())
+            },
+            3 => {
+                let mut octets: [u8;4] = [0;4];
+                octets.copy_from_slice(&option.data[0..4]);
+                let router: Ipv4Addr = octets.into();
+                let router = format!("{}", router);
+                ("router".into(), router.into())
+            },
+            28 => {
+                let mut octets: [u8;4] = [0;4];
+                octets.copy_from_slice(&option.data[0..4]);
+                let broadcast: Ipv4Addr = octets.into();
+                let broadcast = format!("{}", broadcast);
+                ("broadcast".into(), broadcast.into())
+            },
+            _ => ("".into(), JsonValue::Null)
+
+        }
+
+    }
+
 }
 
 struct OptionsIterator<'a> {
@@ -122,8 +173,6 @@ fn main() -> Result<(), Box<Error>> {
 
     let config: Config = serde_json::from_str(&input)?;
 
-    println!("{:?}", config);
-
     if let Some(jid) = config.jid { libjail::attach(jid)?; }
 
     let iface = if let Some(iface) = config.iface { iface }
@@ -167,8 +216,6 @@ fn main() -> Result<(), Box<Error>> {
 
     let socket = UdpSocket::bind("0.0.0.0:68")?;
     socket.set_broadcast(true)?;
-    println!("{:x}", xid);
-    println!("{:?}", iface);
 
     let mut sniffer = Sniffer::new(iface.to_owned())?;
     sniffer.set_timeout(timeout)?
@@ -177,7 +224,6 @@ fn main() -> Result<(), Box<Error>> {
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
-    println!("send dhcp discover");
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let mut result = None;
@@ -210,9 +256,6 @@ fn main() -> Result<(), Box<Error>> {
     let yiaddr = dhcp_offer.yiaddr.to_be();
     let siaddr = dhcp_offer.siaddr.to_be();
 
-    println!("{:?}", Ipv4Addr::from(yiaddr));
-    println!("{:?}", Ipv4Addr::from(siaddr));
-
     let mut dhcp_request = dhcp_offer.clone();
 
     dhcp_request.op = 0x01;
@@ -238,8 +281,6 @@ fn main() -> Result<(), Box<Error>> {
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
 
-    println!("{:?}", &msg_vec);
-
     let mut sniffer = Sniffer::new(iface.to_owned())?;
     sniffer.set_timeout(timeout)?
         .set_promisc(true)?
@@ -247,7 +288,6 @@ fn main() -> Result<(), Box<Error>> {
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
-    println!("send dhcp request");
     socket.send_to(&msg_vec, "255.255.255.255:67")?;
 
     let mut result = None;
@@ -268,17 +308,25 @@ fn main() -> Result<(), Box<Error>> {
     let message_slice = &data[42..message_size];
     let mut dhcp_ack: DhcpMessage = message_slice.into();
     let options_slice = &data[42 + message_size..];
+
     let opt_iter = OptionsIterator {
         slice: options_slice,
         offset: 0,
     };
-
-    let options: HashMap<_, _> = opt_iter
-        .map(|option| (option.code, option))
+    let mut options: HashMap<_, _> = opt_iter
+        .map(|option| option.to_json())
         .collect();
 
-    println!("{:?}", options);
-    println!("exit");
+    options.remove("".into());
+
+    let ip4: Ipv4Addr = dhcp_ack.yiaddr.to_be().into();
+
+    let json = json!({
+        "ip": ip4,
+        "options": options,
+    });
+
+    println!("{:#}", json);
 
     Ok(())
 
