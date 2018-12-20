@@ -323,6 +323,7 @@ fn main() -> Result<(), Box<Error>> {
 
     let json = json!({
         "ip": ip4,
+        "iface": iface,
         "options": options,
     });
 
