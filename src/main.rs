@@ -190,6 +190,31 @@ struct Config {
     hwaddr: Option<String>,
 }
 
+fn set_ip_checksum(header: &mut IpHeader) {
+
+    unsafe {
+
+        let header_ptr = header as *const _ as *mut u16;
+        let mut header_slice: &mut [u16] = slice::from_raw_parts_mut(header_ptr, 10);
+
+        let mut total: u32 = 0; 
+
+        for hex in header_slice.iter() {
+
+            total += *hex as u32;
+            let overflow = total >> 16;
+            total = total & u16::max_value() as u32;
+            total += overflow;
+
+        }
+
+        let total = total as u16;
+        header_slice[6] = total ^ u16::max_value();
+
+    }
+
+}
+
 fn main() -> Result<(), Box<Error>> {
 
     let mut input = String::new();
