@@ -428,7 +428,7 @@ pub fn lookupnet<I>(iface: I) -> Result<(Net, Mask), SnifferError>
 
 }
 
-pub fn get_hdaddr<I>(iface: I) -> Result<u64, SnifferError>
+pub fn get_hwaddr<I>(iface: I) -> Result<u64, SnifferError>
     where I: TryInto<Iface, Error = SnifferError> {
 
         unsafe {

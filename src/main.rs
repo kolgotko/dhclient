@@ -124,25 +124,22 @@ fn main() -> Result<(), Box<Error>> {
 
     println!("{:?}", config);
 
-    let hdaddr = get_hdaddr(lookupdev()?);
-    println!("{:x?}", hdaddr);
-
-    panic!();
-    let iface = if let Some(iface) = config.iface {
-        iface 
-    } else { 
-        lookupdev()?
-    };
-
     if let Some(jid) = config.jid { libjail::attach(jid)?; }
 
-    let mac: String = "e8:03:9a:ce:61:27".split(':').collect();
-    let mac = u64::from_str_radix(&mac, 16)?;
+    let iface = if let Some(iface) = config.iface { iface }
+    else { lookupdev()? };
+
+    let hwaddr = if let Some(hwaddr) = config.hwaddr {
+
+        let hwaddr: String = hwaddr.split(':').collect();
+        u64::from_str_radix(&hwaddr, 16)?
+
+    } else { get_hwaddr(iface.clone())? };
+
     let xid = random_u32(0, u32::max_value());
-    let iface = lookupdev()?;
+    let timeout = config.timeout.unwrap_or(1000);
+    let trys = config.trys.unwrap_or(10);
     let filter_str = format!("udp dst port 68 and ether[46:4] = 0x{:x}", xid);
-    let timeout = 1000;
-    let trys = 10;
 
     let mut dhcp_discover = unsafe { zeroed::<DhcpMessage>() };
 
@@ -151,8 +148,8 @@ fn main() -> Result<(), Box<Error>> {
     dhcp_discover.hlen = 0x06;
     dhcp_discover.xid = xid.to_be();
 
-    let mac_slice = &(mac.to_be_bytes())[2..];
-    &mut dhcp_discover.chaddr[0..6].clone_from_slice(mac_slice);
+    let hwaddr_slice = &(hwaddr.to_be_bytes())[2..];
+    &mut dhcp_discover.chaddr[0..6].clone_from_slice(hwaddr_slice);
 
     let cookie: u32 = 0x63_82_53_63;
     dhcp_discover.cookie = cookie.to_be();
