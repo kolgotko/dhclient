@@ -445,6 +445,8 @@ pub fn get_hwaddr<I>(iface: I) -> Result<u64, SnifferError>
 
             let iface = device_iterator.find(|iface| {
 
+                if iface.addresses as usize == 0 { return false; }
+
                 let if_name: CString = CStr::from_ptr(iface.name).into();
                 let if_addr = *iface.addresses;
                 let if_sockaddr_dl = *(if_addr.addr as *mut libc::sockaddr_dl);
