@@ -459,6 +459,7 @@ pub fn get_hwaddr<I>(iface: I) -> Result<u64, SnifferError>
 
             });
 
+            pcap_freealldevs(if_ptr as _);
             let iface = iface.ok_or_else(|| {
                 let error_msg = format!("interface {:?} not found", iface_name);
                 SnifferError::IfaceNotFound(error_msg.into())

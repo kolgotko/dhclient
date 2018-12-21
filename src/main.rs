@@ -26,6 +26,9 @@ use serde_json::Value as JsonValue;
 use serde_json::json;
 use serde_derive::*;
 
+const HW_BROADCAST: u64 = 0xff_ff_ff_ff_ff_ff;
+const PROTO_UDP: u8 = 17;
+
 #[derive(Debug)]
 struct DhcpOption {
     code: u8,
@@ -150,15 +153,55 @@ impl DhcpMessage {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct EthFrame {
     destination: [u8; 6],
     source: [u8; 6],
     ip_type: [u8; 2],
 }
 
+impl EthFrame {
+
+    fn new() -> Self {
+        let mut eth_frame: EthFrame = unsafe { zeroed() };
+        eth_frame.ip_type = [0x08,0];
+        eth_frame
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe {
+            let message_ptr = self as *const _ as *mut u8;
+            slice::from_raw_parts(message_ptr as *const u8, size_of::<EthFrame>()) 
+        }
+    }
+
+    fn set_source(&mut self, hwaddr: u64) -> &mut Self {
+
+        let hwaddr_bytes: [u8;8] = hwaddr.to_be_bytes();
+        let mut source: [u8;6] = [0;6];
+
+        source.copy_from_slice(&hwaddr_bytes[2..]);
+        self.source = source;
+
+        self
+
+    }
+
+    fn set_destination(&mut self, hwaddr: u64) -> &mut Self {
+
+        let hwaddr_bytes: [u8;8] = hwaddr.to_be_bytes();
+        let mut destination: [u8;6] = [0;6];
+
+        destination.copy_from_slice(&hwaddr_bytes[2..]);
+        self.destination = destination;
+
+        self
+
+    }
+}
+
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct IpHeader {
     ver: u8,
     dscp: u8,
@@ -172,8 +215,53 @@ struct IpHeader {
     destination: u32,
 }
 
+impl IpHeader {
+
+    fn new() -> Self {
+        let mut ip4_header: IpHeader = unsafe { zeroed() };
+        ip4_header.ver = 0x45;
+        ip4_header.ident = 0xed98_u16.to_be();
+        ip4_header.ttl = 64;
+        ip4_header
+    }
+
+    fn set_ttl(&mut self, ttl: u8) -> &mut Self {
+        self.ttl = ttl;
+        self
+    }
+
+    fn set_proto(&mut self, proto: u8) -> &mut Self {
+        self.proto = proto;
+        self
+    }
+
+    fn set_source(&mut self, ip: Ipv4Addr) -> &mut Self {
+        let ip_u32: u32 = ip.into(); 
+        self.source = ip_u32.to_be();
+        self
+    }
+
+    fn set_destination(&mut self, ip: Ipv4Addr) -> &mut Self {
+        let ip_u32: u32 = ip.into(); 
+        self.destination = ip_u32.to_be();
+        self
+    }
+
+    fn set_length(&mut self, length: u16) -> &mut Self {
+        self.length = length.to_be();
+        self
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe {
+            let message_ptr = self as *const _ as *mut u8;
+            slice::from_raw_parts(message_ptr as *const u8, size_of::<IpHeader>()) 
+        }
+    }
+}
+
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct UdpHeader {
     src_port: u16,
     dst_port: u16,
@@ -181,20 +269,95 @@ struct UdpHeader {
     checksum: u16,
 }
 
+impl UdpHeader {
+
+    fn new() -> Self {
+        let mut udp_header: UdpHeader = unsafe { zeroed() };
+        udp_header
+    }
+
+    fn set_src_port(&mut self, port: u16) -> &mut Self {
+        self.src_port = port.to_be();
+        self
+    }
+
+    fn set_dst_port(&mut self, port: u16) -> &mut Self {
+        self.dst_port = port.to_be();
+        self
+    }
+
+    fn set_length(&mut self, length: u16) -> &mut Self {
+        self.length = length.to_be();
+        self
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe {
+            let message_ptr = self as *const _ as *mut u8;
+            slice::from_raw_parts(message_ptr as *const u8, size_of::<UdpHeader>()) 
+        }
+    }
+}
+
+#[derive(Debug)]
+enum PacketBuilderError {
+    NotCompleteError(String),
+}
+
+#[derive(Debug, Clone)]
+struct UdpPacketBuilder {
+    eth_frame: Option<EthFrame>,
+    ip_header: Option<IpHeader>,
+    udp_header: Option<UdpHeader>,
+    payload: Vec<u8>,
+}
+
+impl UdpPacketBuilder {
+
+    fn new() -> Self {
+
+        UdpPacketBuilder {
+            eth_frame: None,
+            ip_header: None,
+            udp_header: None,
+            payload: Vec::new(),
+        }
+
+    }
+
+    fn is_complete(&self) -> bool {
+        self.eth_frame.is_some() &&
+            self.ip_header.is_some() &&
+            self.udp_header.is_some()
+    }
+
+    fn build_to_vec(&mut self) -> Result<Vec<u8>, PacketBuilderError> {
+
+        if !self.is_complete() {
+            let error = "builder not complete".into();
+            return PacketBuilderError::NotCompleteError(error);
+        }
+
+        Ok(Vec::new())
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Config {
-    jid: Option<i32>,
     iface: Option<String>,
+    hwaddr: Option<String>,
     timeout: Option<i32>,
     trys: Option<i32>,
-    hwaddr: Option<String>,
+    jid: Option<i32>,
 }
 
 fn set_ip_checksum(header: &mut IpHeader) {
 
     unsafe {
 
-        let header_ptr = header as *const _ as *mut u16;
+        let header_clone = header.clone();
+        let header_ptr = &header_clone as *const _ as *mut u16;
         let mut header_slice: &mut [u16] = slice::from_raw_parts_mut(header_ptr, 10);
 
         let mut total: u32 = 0; 
@@ -209,7 +372,7 @@ fn set_ip_checksum(header: &mut IpHeader) {
         }
 
         let total = total as u16;
-        header_slice[6] = total ^ u16::max_value();
+        header.checksum = total ^ u16::max_value();
 
     }
 
@@ -263,6 +426,42 @@ fn main() -> Result<(), Box<Error>> {
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
 
+    let mut eth_frame = EthFrame::new();
+    let mut ip4_header = IpHeader::new();
+    let mut udp_header = UdpHeader::new();
+
+    eth_frame.set_source(hwaddr)
+        .set_destination(HW_BROADCAST);
+
+    ip4_header.set_proto(PROTO_UDP)
+        .set_destination(Ipv4Addr::UNSPECIFIED)
+        .set_destination(Ipv4Addr::BROADCAST);
+
+    ip4_header.length = (msg_vec.len() + size_of::<UdpHeader>() + size_of::<IpHeader>()) as _;
+    ip4_header.length = ip4_header.length.to_be();
+
+    set_ip_checksum(&mut ip4_header);
+
+    udp_header.set_src_port(68)
+        .set_dst_port(67);
+
+    udp_header.length = (msg_vec.len() + size_of::<UdpHeader>()) as _;
+    udp_header.length = udp_header.length.to_be();
+
+    let mut eth_msg: Vec<u8> = Vec::new();
+    eth_msg.extend_from_slice(eth_frame.as_slice());
+    eth_msg.extend_from_slice(ip4_header.as_slice());
+    eth_msg.extend_from_slice(udp_header.as_slice());
+    eth_msg.append(&mut msg_vec);
+
+    let mut sniffer = Sniffer::new(iface.to_owned())?;
+    sniffer.set_timeout(timeout)?
+        .set_promisc(true)?
+        .set_snaplen(BUFSIZ as i32)?
+        .activate()?;
+
+    sniffer.inject(&eth_msg[..])?;
+    panic!();
     let socket = UdpSocket::bind("0.0.0.0:68")?;
     socket.set_broadcast(true)?;
 
