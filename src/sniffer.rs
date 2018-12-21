@@ -470,12 +470,13 @@ pub fn get_hwaddr<I>(iface: I) -> Result<u64, SnifferError>
 
             let data_ptr = &if_sockaddr_dl.sdl_data as *const _ as *mut [u8; 46];
             let data = *data_ptr;
+            let sdl_nlen = if_sockaddr_dl.sdl_nlen as usize;
 
-            let hdaddr: &mut [u8; 8] = &mut [0; 8];
-            &mut hdaddr[2..8].clone_from_slice(&data[4..10]);
-            let hdaddr = u64::from_be_bytes(*hdaddr);
+            let hwaddr: &mut [u8; 8] = &mut [0; 8];
+            &mut hwaddr[2..8].clone_from_slice(&data[sdl_nlen..sdl_nlen + 6]);
+            let hwaddr = u64::from_be_bytes(*hwaddr);
 
-            Ok(hdaddr)
+            Ok(hwaddr)
 
         }
 

@@ -299,46 +299,63 @@ impl UdpHeader {
     }
 }
 
-#[derive(Debug)]
-enum PacketBuilderError {
-    NotCompleteError(String),
-}
-
 #[derive(Debug, Clone)]
 struct UdpPacketBuilder {
-    eth_frame: Option<EthFrame>,
-    ip_header: Option<IpHeader>,
-    udp_header: Option<UdpHeader>,
-    payload: Vec<u8>,
+    eth_frame: EthFrame,
+    ip_header: IpHeader,
+    udp_header: UdpHeader,
+    payload: Option<Vec<u8>>,
 }
 
 impl UdpPacketBuilder {
 
-    fn new() -> Self {
+    fn new(headers: (EthFrame, IpHeader, UdpHeader)) -> Self {
+
+        let (eth_frame, ip_header, udp_header) = headers;
 
         UdpPacketBuilder {
-            eth_frame: None,
-            ip_header: None,
-            udp_header: None,
-            payload: Vec::new(),
+            eth_frame,
+            ip_header,
+            udp_header,
+            payload: None,
         }
 
     }
 
-    fn is_complete(&self) -> bool {
-        self.eth_frame.is_some() &&
-            self.ip_header.is_some() &&
-            self.udp_header.is_some()
+    fn set_payload(&mut self, value: Vec<u8>) -> &mut Self {
+        self.payload = Some(value);
+        self
     }
 
-    fn build_to_vec(&mut self) -> Result<Vec<u8>, PacketBuilderError> {
+    fn build_to_vec(&mut self) -> Vec<u8> {
 
-        if !self.is_complete() {
-            let error = "builder not complete".into();
-            return PacketBuilderError::NotCompleteError(error);
+        let eth_frame = &self.eth_frame;
+        let mut ip_header = &mut self.ip_header;
+        let mut udp_header = &mut self.udp_header;
+
+        let mut payload_len = 0;
+        if let Some(payload) = &self.payload {
+            payload_len = payload.len();
         }
 
-        Ok(Vec::new())
+        ip_header.length = (payload_len + size_of::<UdpHeader>() + size_of::<IpHeader>()) as _;
+        ip_header.length = ip_header.length.to_be();
+
+        set_ip_checksum(&mut ip_header);
+
+        udp_header.length = (payload_len + size_of::<UdpHeader>()) as _;
+        udp_header.length = udp_header.length.to_be();
+
+        let mut result: Vec<u8> = Vec::new();
+        result.extend_from_slice(eth_frame.as_slice());
+        result.extend_from_slice(ip_header.as_slice());
+        result.extend_from_slice(udp_header.as_slice());
+
+        if let Some(payload) = &self.payload {
+            result.extend_from_slice(&payload[..]);
+        }
+
+        result
     }
 }
 
@@ -437,47 +454,37 @@ fn main() -> Result<(), Box<Error>> {
         .set_destination(Ipv4Addr::UNSPECIFIED)
         .set_destination(Ipv4Addr::BROADCAST);
 
-    ip4_header.length = (msg_vec.len() + size_of::<UdpHeader>() + size_of::<IpHeader>()) as _;
-    ip4_header.length = ip4_header.length.to_be();
-
-    set_ip_checksum(&mut ip4_header);
-
     udp_header.set_src_port(68)
         .set_dst_port(67);
 
-    udp_header.length = (msg_vec.len() + size_of::<UdpHeader>()) as _;
-    udp_header.length = udp_header.length.to_be();
+    let header = (eth_frame, ip4_header, udp_header);
+    let mut builder = UdpPacketBuilder::new(header);
+    builder.set_payload(msg_vec);
 
-    let mut eth_msg: Vec<u8> = Vec::new();
-    eth_msg.extend_from_slice(eth_frame.as_slice());
-    eth_msg.extend_from_slice(ip4_header.as_slice());
-    eth_msg.extend_from_slice(udp_header.as_slice());
-    eth_msg.append(&mut msg_vec);
+    let eth_msg = builder.build_to_vec();
 
-    let mut sniffer = Sniffer::new(iface.to_owned())?;
-    sniffer.set_timeout(timeout)?
+    let mut out_sniffer = Sniffer::new(iface.to_owned())?;
+    out_sniffer.set_timeout(timeout)?
         .set_promisc(true)?
         .set_snaplen(BUFSIZ as i32)?
         .activate()?;
 
-    sniffer.inject(&eth_msg[..])?;
-    panic!();
     let socket = UdpSocket::bind("0.0.0.0:68")?;
     socket.set_broadcast(true)?;
 
-    let mut sniffer = Sniffer::new(iface.to_owned())?;
-    sniffer.set_timeout(timeout)?
+    let mut in_sniffer = Sniffer::new(iface.to_owned())?;
+    in_sniffer.set_timeout(timeout)?
         .set_promisc(true)?
         .set_snaplen(BUFSIZ as i32)?
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
-    socket.send_to(&msg_vec, "255.255.255.255:67")?;
+    out_sniffer.inject(&eth_msg[..])?;
 
     let mut result = None;
     for _ in 0..trys {
 
-        match sniffer.read_next() {
+        match in_sniffer.read_next() {
             option @ Some(_) => {
                 result = option;
                 break;
@@ -503,12 +510,17 @@ fn main() -> Result<(), Box<Error>> {
 
     let yiaddr = dhcp_offer.yiaddr.to_be();
     let siaddr = dhcp_offer.siaddr.to_be();
+    let offer_option_54 = options.get(&54)
+        .ok_or("option 54 not found in offer")?;
 
     let mut dhcp_request = dhcp_offer.clone();
+
+    let server_ip_ptr = offer_option_54.data.as_ptr() as *mut u32;
 
     dhcp_request.op = 0x01;
     dhcp_request.yiaddr = 0x0;
     dhcp_request.siaddr = 0x0;
+    dhcp_request.siaddr = unsafe { *server_ip_ptr };
 
     let mut options: Vec<u8> = Vec::new();
 
@@ -520,14 +532,26 @@ fn main() -> Result<(), Box<Error>> {
     let option_50 = option_50.to_be_bytes();
     options.extend_from_slice(&option_50[2..]);
 
+    println!("{:x?}", offer_option_54);
     let option_54: u64 = 0x36_04_00_00_00_00 + siaddr as u64;
-    let option_54 = option_54.to_be_bytes();
+    let mut option_54 = option_54.to_be_bytes();
+    &option_54[4..].copy_from_slice(&offer_option_54.data[..]);
+    println!("{:x?}", option_54);
     options.extend_from_slice(&option_54[2..]);
 
     let msg_sclie = dhcp_request.as_slice();
     let mut msg_vec = msg_slice.to_vec();
     msg_vec.append(&mut options);
     msg_vec.push(0xff);
+
+    let mut out_sniffer = Sniffer::new(iface.to_owned())?;
+    out_sniffer.set_timeout(timeout)?
+        .set_promisc(true)?
+        .set_snaplen(BUFSIZ as i32)?
+        .activate()?;
+
+    builder.set_payload(msg_vec);
+    let eth_msg = builder.build_to_vec();
 
     let mut sniffer = Sniffer::new(iface.to_owned())?;
     sniffer.set_timeout(timeout)?
@@ -536,7 +560,7 @@ fn main() -> Result<(), Box<Error>> {
         .activate()?
         .set_filter(filter_str.to_owned())?;
 
-    socket.send_to(&msg_vec, "255.255.255.255:67")?;
+    out_sniffer.inject(&eth_msg[..])?;
 
     let mut result = None;
     for _ in 0..trys {
