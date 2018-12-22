@@ -79,7 +79,6 @@ impl DhcpOption {
                 ("broadcast".into(), broadcast.into())
             },
             _ => ("".into(), JsonValue::Null)
-
         }
 
     }
@@ -112,6 +111,19 @@ impl Iterator for OptionsIterator<'_> {
             length: *length,
             data: data.into(),
         })
+    }
+}
+
+trait AsSliceU16 {
+    fn as_slice_u16(&self) -> &[u16];
+}
+
+impl AsSliceU16 for Vec<u8> {
+    fn as_slice_u16(&self) -> &[u16] {
+        unsafe {
+            let vec_ptr = self.as_ptr() as *const u16;
+            slice::from_raw_parts(vec_ptr, self.len() / 2)
+        }
     }
 }
 
@@ -220,7 +232,6 @@ impl IpHeader {
     fn new() -> Self {
         let mut ip4_header: IpHeader = unsafe { zeroed() };
         ip4_header.ver = 0x45;
-        ip4_header.ident = 0xed98_u16.to_be();
         ip4_header.ttl = 64;
         ip4_header
     }
@@ -254,8 +265,19 @@ impl IpHeader {
 
     fn as_slice(&self) -> &[u8] {
         unsafe {
-            let message_ptr = self as *const _ as *mut u8;
-            slice::from_raw_parts(message_ptr as *const u8, size_of::<IpHeader>()) 
+            let message_ptr = self.as_ptr() as *const u8;
+            slice::from_raw_parts(message_ptr, size_of::<IpHeader>()) 
+        }
+    }
+
+    fn as_ptr(&self) -> *const Self {
+        self as *const _
+    }
+
+    fn as_slice_u16(&self) -> &[u16] {
+        unsafe {
+            let message_ptr = self.as_ptr() as *const u16;
+            slice::from_raw_parts(message_ptr, size_of::<IpHeader>() / 2)
         }
     }
 }
@@ -291,10 +313,21 @@ impl UdpHeader {
         self
     }
 
+    fn as_ptr(&self) -> *const Self {
+        self as *const _
+    }
+
+    fn as_slice_u16(&self) -> &[u16] {
+        unsafe {
+            let message_ptr = self.as_ptr() as *const u16;
+            slice::from_raw_parts(message_ptr, size_of::<UdpHeader>() / 2)
+        }
+    }
+
     fn as_slice(&self) -> &[u8] {
         unsafe {
-            let message_ptr = self as *const _ as *mut u8;
-            slice::from_raw_parts(message_ptr as *const u8, size_of::<UdpHeader>()) 
+            let message_ptr = self.as_ptr() as *const u8;
+            slice::from_raw_parts(message_ptr, size_of::<UdpHeader>()) 
         }
     }
 }
@@ -341,7 +374,8 @@ impl UdpPacketBuilder {
         ip_header.length = (payload_len + size_of::<UdpHeader>() + size_of::<IpHeader>()) as _;
         ip_header.length = ip_header.length.to_be();
 
-        set_ip_checksum(&mut ip_header);
+        ip_header.checksum = 0;
+        ip_header.checksum = checksum(ip_header.as_slice_u16());
 
         udp_header.length = (payload_len + size_of::<UdpHeader>()) as _;
         udp_header.length = udp_header.length.to_be();
@@ -369,29 +403,21 @@ struct Config {
     jid: Option<i32>,
 }
 
-fn set_ip_checksum(header: &mut IpHeader) {
+fn checksum(data: &[u16]) -> u16 {
 
-    unsafe {
+    let mut total: u32 = 0; 
 
-        let header_clone = header.clone();
-        let header_ptr = &header_clone as *const _ as *mut u16;
-        let mut header_slice: &mut [u16] = slice::from_raw_parts_mut(header_ptr, 10);
+    for hex in data.iter() {
 
-        let mut total: u32 = 0; 
-
-        for hex in header_slice.iter() {
-
-            total += *hex as u32;
-            let overflow = total >> 16;
-            total = total & u16::max_value() as u32;
-            total += overflow;
-
-        }
-
-        let total = total as u16;
-        header.checksum = total ^ u16::max_value();
+        total += *hex as u32;
+        let overflow = total >> 16;
+        total = total & u16::max_value() as u32;
+        total += overflow;
 
     }
+
+    let total = total as u16;
+    total ^ u16::max_value()
 
 }
 
@@ -429,11 +455,9 @@ fn main() -> Result<(), Box<Error>> {
     let hwaddr_slice = &(hwaddr.to_be_bytes())[2..];
     &mut dhcp_discover.chaddr[0..6].clone_from_slice(hwaddr_slice);
 
-    let cookie: u32 = 0x63_82_53_63;
-    dhcp_discover.cookie = cookie.to_be();
+    dhcp_discover.cookie = 0x63_82_53_63_u32.to_be();
 
     let mut options: Vec<u8> = Vec::new();
-
     let mut option_53: u32 = 0x35_01_01;
     let option_53 = option_53.to_be_bytes();
     options.extend_from_slice(&option_53[1..]);
@@ -464,13 +488,7 @@ fn main() -> Result<(), Box<Error>> {
     let eth_msg = builder.build_to_vec();
 
     let mut out_sniffer = Sniffer::new(iface.to_owned())?;
-    out_sniffer.set_timeout(timeout)?
-        .set_promisc(true)?
-        .set_snaplen(BUFSIZ as i32)?
-        .activate()?;
-
-    let socket = UdpSocket::bind("0.0.0.0:68")?;
-    socket.set_broadcast(true)?;
+    out_sniffer.activate()?;
 
     let mut in_sniffer = Sniffer::new(iface.to_owned())?;
     in_sniffer.set_timeout(timeout)?
@@ -532,11 +550,9 @@ fn main() -> Result<(), Box<Error>> {
     let option_50 = option_50.to_be_bytes();
     options.extend_from_slice(&option_50[2..]);
 
-    println!("{:x?}", offer_option_54);
     let option_54: u64 = 0x36_04_00_00_00_00 + siaddr as u64;
     let mut option_54 = option_54.to_be_bytes();
     &option_54[4..].copy_from_slice(&offer_option_54.data[..]);
-    println!("{:x?}", option_54);
     options.extend_from_slice(&option_54[2..]);
 
     let msg_sclie = dhcp_request.as_slice();
@@ -545,10 +561,7 @@ fn main() -> Result<(), Box<Error>> {
     msg_vec.push(0xff);
 
     let mut out_sniffer = Sniffer::new(iface.to_owned())?;
-    out_sniffer.set_timeout(timeout)?
-        .set_promisc(true)?
-        .set_snaplen(BUFSIZ as i32)?
-        .activate()?;
+    out_sniffer.activate()?;
 
     builder.set_payload(msg_vec);
     let eth_msg = builder.build_to_vec();
