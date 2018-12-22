@@ -60,15 +60,15 @@ pub enum SnifferError {
 impl fmt::Display for SnifferError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SnifferError::NulError(error) => error.fmt(f),
+            SnifferError::NulError(value) => value.fmt(f),
             SnifferError::CreateError(value) => value.fmt(f),
-            SnifferError::FromBytesWithNulError(error) => error.fmt(f),
-            SnifferError::Utf8Error(error) => error.fmt(f),
-            SnifferError::SetFilterError(error) => error.fmt(f),
-            SnifferError::SetTimeoutError(error) => error.fmt(f),
-            SnifferError::SetSnaplenError(error) => error.fmt(f),
-            SnifferError::SetPromiscError(error) => error.fmt(f),
-            SnifferError::CompileRuleError(error) => error.fmt(f),
+            SnifferError::FromBytesWithNulError(value) => value.fmt(f),
+            SnifferError::Utf8Error(value) => value.fmt(f),
+            SnifferError::SetFilterError(value) => value.fmt(f),
+            SnifferError::SetTimeoutError(value) => value.fmt(f),
+            SnifferError::SetSnaplenError(value) => value.fmt(f),
+            SnifferError::SetPromiscError(value) => value.fmt(f),
+            SnifferError::CompileRuleError(value) => value.fmt(f),
             SnifferError::LookupNetError(value) => value.fmt(f),
             SnifferError::DispatchError(value) => value.fmt(f),
             SnifferError::ActivateError(value) => value.fmt(f),
@@ -219,7 +219,7 @@ impl Sniffer {
         };
 
         if handle as usize == 0 {
-            let cstr_error = CStr::from_bytes_with_nul(&error)?;
+            let cstr_error = unsafe { CStr::from_ptr(error.as_ptr() as _) };
             let string_error = cstr_error.to_str()?.to_string();
             Err(SnifferError::CreateError(string_error))
         } else {
@@ -291,7 +291,7 @@ impl Sniffer {
             );
 
             if result == -1 {
-                let cstr_error = CStr::from_bytes_with_nul(&error)?;
+                let cstr_error = CStr::from_ptr(error.as_ptr() as _);
                 let string_error = cstr_error.to_str()?.to_string();
                 return Err(SnifferError::LookupNetError(string_error));
             }
@@ -419,7 +419,7 @@ pub fn lookupnet<I>(iface: I) -> Result<(Net, Mask), SnifferError>
     };
 
     if result == -1 {
-        let cstr_error = CStr::from_bytes_with_nul(&error)?;
+        let cstr_error = unsafe { CStr::from_ptr(error.as_ptr() as _) };
         let string_error = cstr_error.to_str()?.to_string();
         Err(SnifferError::LookupNetError(string_error))
     } else {
