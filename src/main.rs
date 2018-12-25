@@ -28,6 +28,7 @@ use serde_derive::*;
 
 const HW_BROADCAST: u64 = 0xff_ff_ff_ff_ff_ff;
 const PROTO_UDP: u8 = 17;
+const UNDEFINED: &str = "undefined";
 
 #[derive(Debug)]
 struct DhcpOption {
@@ -78,7 +79,7 @@ impl DhcpOption {
                 let broadcast = format!("{}", broadcast);
                 ("broadcast".into(), broadcast.into())
             },
-            _ => ("".into(), JsonValue::Null)
+            _ => (UNDEFINED.into(), JsonValue::Null)
         }
 
     }
@@ -602,7 +603,7 @@ fn main() -> Result<(), Box<Error>> {
         .map(|option| option.to_json())
         .collect();
 
-    options.remove("".into());
+    options.remove(UNDEFINED.into());
 
     let ip4: Ipv4Addr = dhcp_ack.yiaddr.to_be().into();
 
