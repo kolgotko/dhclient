@@ -5,3 +5,4 @@ DHCP client for FreeBSD
 - [X] discover
 - [ ] realease method
 - [ ] auto release
+- [ ] ipv6 support
