@@ -5,6 +5,7 @@ extern crate serde_json;
 extern crate serde_derive;
 extern crate libjail;
 extern crate libc;
+extern crate ipnetwork;
 
 use dhclient::pcap::*;
 use dhclient::sniffer::*;
@@ -25,6 +26,7 @@ use std::thread;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use serde_derive::*;
+use ipnetwork::*;
 
 const HW_BROADCAST: u64 = 0xff_ff_ff_ff_ff_ff;
 const PROTO_UDP: u8 = 17;
@@ -45,41 +47,67 @@ impl DhcpOption {
 
         match option.code {
             1 => {
+                let netmask = self.to_string();
+                ("netmask".into(), netmask.into())
+            },
+            15 => {
+                let domain = self.to_string();
+                ("domain".into(), domain.into())
+            },
+            6 => {
+                let nameserver = self.to_string();
+                ("nameserver".into(), nameserver.into())
+            },
+            3 => {
+                let router = self.to_string();
+                ("router".into(), router.into())
+            },
+            28 => {
+                let broadcast = self.to_string();
+                ("broadcast".into(), broadcast.into())
+            },
+            _ => (UNDEFINED.into(), JsonValue::Null)
+        }
+
+    }
+
+    fn to_string(&self) -> String {
+
+        let option = self;
+
+        match option.code {
+            1 => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let netmask: Ipv4Addr = octets.into();
-                let netmask = format!("{}", netmask);
-                ("netmask".into(), netmask.into())
+                format!("{}", netmask)
             },
             15 => {
                 let mut data = option.data.clone();
                 data.push(0);
                 let domain = unsafe { CStr::from_ptr(data.as_ptr() as _) };
                 let domain = domain.to_str().unwrap();
-                ("domain".into(), domain.into())
+                domain.into()
             },
             6 => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let nameserver: Ipv4Addr = octets.into();
-                let nameserver = format!("{}", nameserver);
-                ("nameserver".into(), nameserver.into())
+                format!("{}", nameserver)
             },
             3 => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let router: Ipv4Addr = octets.into();
-                let router = format!("{}", router);
-                ("router".into(), router.into())
+                format!("{}", router)
             },
             28 => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let broadcast: Ipv4Addr = octets.into();
-                let broadcast = format!("{}", broadcast);
-                ("broadcast".into(), broadcast.into())
+                format!("{}", broadcast)
             },
-            _ => (UNDEFINED.into(), JsonValue::Null)
+            _ => UNDEFINED.into()
         }
 
     }
@@ -599,18 +627,32 @@ fn main() -> Result<(), Box<Error>> {
         slice: options_slice,
         offset: 0,
     };
-    let mut options: HashMap<_, _> = opt_iter
-        .map(|option| option.to_json())
-        .collect();
 
-    options.remove(UNDEFINED.into());
+    let mut options_map: HashMap<_, _> = opt_iter
+        .map(|option| (option.code, option))
+        .collect();
 
     let ip4: Ipv4Addr = dhcp_ack.yiaddr.to_be().into();
 
+    let ip4_cidr = if let Some(mask) = options_map.get(&1) {
+        let prefix = ipv4_mask_to_prefix(mask.to_string().parse()?)?;
+        format!("{}/{}", ip4, prefix)
+    } else {
+        format!("{}/32", ip4)
+    };
+
+    let mut options_json_map: HashMap<_, _> = options_map
+        .iter()
+        .map(|(_, option)| option.to_json())
+        .collect();
+
+    options_json_map.remove(UNDEFINED.into());
+
     let json = json!({
         "ip": ip4,
+        "ip_cidr": ip4_cidr,
         "iface": iface,
-        "options": options,
+        "options": options_json_map,
     });
 
     println!("{:#}", json);
