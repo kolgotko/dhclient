@@ -32,6 +32,12 @@ const HW_BROADCAST: u64 = 0xff_ff_ff_ff_ff_ff;
 const PROTO_UDP: u8 = 17;
 const UNDEFINED: &str = "undefined";
 
+const OPT_NETMASK: u8 = 1;
+const OPT_DOMAIN: u8 = 15;
+const OPT_NAMESERVER: u8 = 6;
+const OPT_ROUTER: u8 = 3;
+const OPT_BROADCAST: u8 = 28;
+
 #[derive(Debug)]
 struct DhcpOption {
     code: u8,
@@ -46,23 +52,23 @@ impl DhcpOption {
         let option = self;
 
         match option.code {
-            1 => {
+            OPT_NETMASK => {
                 let netmask = self.to_string();
                 ("netmask".into(), netmask.into())
             },
-            15 => {
+            OPT_DOMAIN => {
                 let domain = self.to_string();
                 ("domain".into(), domain.into())
             },
-            6 => {
+            OPT_NAMESERVER => {
                 let nameserver = self.to_string();
                 ("nameserver".into(), nameserver.into())
             },
-            3 => {
+            OPT_ROUTER => {
                 let router = self.to_string();
                 ("router".into(), router.into())
             },
-            28 => {
+            OPT_BROADCAST => {
                 let broadcast = self.to_string();
                 ("broadcast".into(), broadcast.into())
             },
@@ -76,32 +82,32 @@ impl DhcpOption {
         let option = self;
 
         match option.code {
-            1 => {
+            OPT_NETMASK => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let netmask: Ipv4Addr = octets.into();
                 format!("{}", netmask)
             },
-            15 => {
+            OPT_DOMAIN => {
                 let mut data = option.data.clone();
                 data.push(0);
                 let domain = unsafe { CStr::from_ptr(data.as_ptr() as _) };
                 let domain = domain.to_str().unwrap();
                 domain.into()
             },
-            6 => {
+            OPT_NAMESERVER => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let nameserver: Ipv4Addr = octets.into();
                 format!("{}", nameserver)
             },
-            3 => {
+            OPT_ROUTER => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let router: Ipv4Addr = octets.into();
                 format!("{}", router)
             },
-            28 => {
+            OPT_BROADCAST => {
                 let mut octets: [u8;4] = [0;4];
                 octets.copy_from_slice(&option.data[0..4]);
                 let broadcast: Ipv4Addr = octets.into();
@@ -634,7 +640,7 @@ fn main() -> Result<(), Box<Error>> {
 
     let ip4: Ipv4Addr = dhcp_ack.yiaddr.to_be().into();
 
-    let ip4_cidr = if let Some(mask) = options_map.get(&1) {
+    let ip4_cidr = if let Some(mask) = options_map.get(&OPT_NETMASK) {
         let prefix = ipv4_mask_to_prefix(mask.to_string().parse()?)?;
         format!("{}/{}", ip4, prefix)
     } else {
