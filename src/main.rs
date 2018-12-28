@@ -22,7 +22,6 @@ use std::net::*;
 use std::net::*;
 use std::ptr;
 use std::slice;
-use std::thread;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use serde_derive::*;
@@ -658,6 +657,7 @@ fn main() -> Result<(), Box<Error>> {
         "ip": ip4,
         "ip_cidr": ip4_cidr,
         "iface": iface,
+        "hwaddr": format!("{:x}", hwaddr),
         "options": options_json_map,
     });
 
