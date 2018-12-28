@@ -22,6 +22,7 @@ use std::net::*;
 use std::net::*;
 use std::ptr;
 use std::slice;
+use std::process;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use serde_derive::*;
@@ -455,7 +456,7 @@ fn checksum(data: &[u16]) -> u16 {
 
 }
 
-fn main() -> Result<(), Box<Error>> {
+fn discover() -> Result<JsonValue, Box<dyn Error>> {
 
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
@@ -661,8 +662,22 @@ fn main() -> Result<(), Box<Error>> {
         "options": options_json_map,
     });
 
-    println!("{:#}", json);
+    Ok(json)
 
-    Ok(())
+}
+
+fn main() {
+
+    let result = discover();
+
+    match result {
+        Err(error) => {
+            println!("{:#}", json!({
+                "msg": format!("{}", error),
+            }));
+            process::exit(1);
+        },
+        Ok(json) => println!("{:#}", json)
+    }
 
 }
